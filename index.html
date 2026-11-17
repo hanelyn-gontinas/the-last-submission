@@ -4,6 +4,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#292b29">
   <title>The Last Submission | School Exploration</title>
   <link rel="stylesheet" href="style.css">
 </head>
@@ -23,15 +24,12 @@
       <p class="eyebrow">A FIRST-PERSON SCHOOL ADVENTURE</p>
       <h1>THE LAST<br><span>SUBMISSION</span></h1>
       <p class="subtitle">One thesis. Three floors. One deadline.</p>
-
       <div class="deadline">
         <strong>11:59 PM</strong>
         <span>THESIS SUBMISSION DEADLINE</span>
       </div>
-
       <button id="start-button" class="primary-button">ENTER THE SCHOOL</button>
       <button id="instructions-button" class="secondary-button">HOW TO PLAY</button>
-
       <p class="menu-footer">EXPLORE • DISCOVER • COMPLETE YOUR MISSION</p>
     </div>
   </section>
@@ -40,13 +38,13 @@
     <div class="modal-card">
       <p class="eyebrow">PLAYER GUIDE</p>
       <h2>HOW TO PLAY</h2>
-
       <div class="control-row"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd><span>Walk around</span></div>
       <div class="control-row"><kbd>MOUSE</kbd><span>Look around</span></div>
-      <div class="control-row"><kbd>E</kbd><span>Interact with objects and people</span></div>
+      <div class="control-row"><kbd>E</kbd><span>Interact, open doors, and use stairs</span></div>
+      <div class="control-row"><kbd>SPACE</kbd><span>Jump</span></div>
+      <div class="control-row"><kbd>SHIFT</kbd><span>Show / hide cursor</span></div>
       <div class="control-row"><kbd>ESC</kbd><span>Pause the game</span></div>
-
-      <p>Explore the school, enter different rooms, complete your tasks, and submit your thesis before the deadline.</p>
+      <p>Explore the school, enter the rooms, and complete all practical tasks. Finish every objective on your current floor before going downstairs. Complete all nine tasks before the five-minute deadline.</p>
       <button id="back-button" class="primary-button">BACK TO MENU</button>
     </div>
   </section>
@@ -54,7 +52,6 @@
   <div id="game-hud" class="hidden">
     <header class="topbar">
       <div class="game-brand"><span></span> THE LAST SUBMISSION</div>
-
       <div class="stats">
         <div><small>TIME LEFT</small><strong id="timer">05:00</strong></div>
         <div><small>FLOOR</small><strong id="floor-display">3RD FLOOR</strong></div>
@@ -66,12 +63,9 @@
       <p class="eyebrow">CURRENT LOCATION</p>
       <h2 id="location-name">THIRD FLOOR</h2>
       <p id="floor-description">Explore the school.</p>
-
       <div class="panel-divider"></div>
-
       <h3>YOUR OBJECTIVES</h3>
       <div id="objective-list"></div>
-
       <div class="progress-label">
         <span>FLOOR PROGRESS</span>
         <strong id="progress-text">0 / 3</strong>
@@ -90,9 +84,10 @@
 
     <footer class="bottom-bar">
       <div class="controls-hint">
-        <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd>
-        <span>MOVE</span>
+        <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd><span>MOVE</span>
         <kbd>E</kbd><span>INTERACT</span>
+        <kbd>SPACE</kbd><span>JUMP</span>
+        <kbd>SHIFT</kbd><span>CURSOR</span>
         <kbd>ESC</kbd><span>PAUSE</span>
       </div>
       <button id="pause-button" class="pause-button">PAUSE</button>
@@ -100,13 +95,12 @@
   </div>
 
   <section id="interaction-screen" class="screen hidden">
-    <div class="modal-card">
+    <div class="modal-card task-modal">
       <p class="eyebrow" id="interaction-category">MISSION TASK</p>
-      <h2 id="interaction-title">INTERACTION</h2>
+      <h2 id="interaction-title">TASK</h2>
       <p id="interaction-description"></p>
       <div id="interaction-extra" class="interaction-extra"></div>
-      <button id="complete-button" class="primary-button">COMPLETE TASK</button>
-      <button id="close-interaction" class="secondary-button">GO BACK</button>
+      <button id="close-interaction" class="secondary-button">LEAVE TASK</button>
     </div>
   </section>
 
@@ -126,18 +120,15 @@
       <p class="eyebrow" id="result-label">MISSION COMPLETE</p>
       <h2 id="result-title">THESIS SUBMITTED!</h2>
       <p id="result-message"></p>
-
       <div class="final-score">
         <small>FINAL SCORE</small>
         <strong id="final-score">0000</strong>
       </div>
-
       <button id="play-again-button" class="primary-button">PLAY AGAIN</button>
       <button id="result-menu-button" class="secondary-button">MAIN MENU</button>
     </div>
   </section>
 
-  <!-- Three.js is loaded as a regular script to avoid module import errors -->
   <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
   <script src="script.js"></script>
 </body>
