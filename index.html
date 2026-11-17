@@ -25,7 +25,7 @@
       <h1>THE LAST<br><span>SUBMISSION</span></h1>
       <p class="subtitle">One thesis. Three floors. One deadline.</p>
       <div class="deadline">
-        <strong>11:59 PM</strong>
+        <strong>12 NN</strong>
         <span>THESIS SUBMISSION DEADLINE</span>
       </div>
       <button id="start-button" class="primary-button">ENTER THE SCHOOL</button>
@@ -34,34 +34,45 @@
     </div>
   </section>
 
-  <section id="instructions-screen" class="screen hidden">
-    <div class="modal-card">
-      <p class="eyebrow">PLAYER GUIDE</p>
-      <h2>HOW TO PLAY</h2>
-      <div class="control-row"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd><span>Walk around</span></div>
-      <div class="control-row"><kbd>MOUSE</kbd><span>Look around</span></div>
-      <div class="control-row"><kbd>E</kbd><span>Interact, open doors, and use stairs</span></div>
-      <div class="control-row"><kbd>SPACE</kbd><span>Jump</span></div>
-      <div class="control-row"><kbd>SHIFT</kbd><span>Show / hide cursor</span></div>
-      <div class="control-row"><kbd>ESC</kbd><span>Pause the game</span></div>
-      <p>Explore the school, enter the rooms, and complete all practical tasks. Finish every objective on your current floor before going downstairs. Complete all nine tasks before the five-minute deadline.</p>
-      <button id="back-button" class="primary-button">BACK TO MENU</button>
-    </div>
-  </section>
+<section id="instructions-screen" class="screen hidden">
+  <div class="modal-card">
+    <p class="eyebrow">PLAYER GUIDE</p>
+    <h2>HOW TO PLAY</h2>
+
+    <div class="control-row"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd><span>Walk around</span></div>
+    <div class="control-row"><kbd>MOUSE</kbd><span>Look around</span></div>
+    <div class="control-row"><kbd>E</kbd><span>Interact, open doors, and use stairs</span></div>
+    <div class="control-row"><kbd>SPACE</kbd><span>Jump</span></div>
+    <div class="control-row"><kbd>SHIFT</kbd><span>Show / hide cursor</span></div>
+    <div class="control-row"><kbd>ESC</kbd><span>Pause the game</span></div>
+
+<p>Explore the school, enter the rooms, and complete all practical tasks. Finish every objective on your current floor before going downstairs. Complete all nine tasks within 4 minutes and 30 seconds.</p>
+    <button id="back-button" class="primary-button">BACK TO MENU</button>
+  </div>
+</section>
 
   <div id="game-hud" class="hidden">
     <header class="topbar">
       <div class="game-brand"><span></span> THE LAST SUBMISSION</div>
-      <div class="stats">
-        <div><small>TIME LEFT</small><strong id="timer">05:00</strong></div>
-        <div><small>FLOOR</small><strong id="floor-display">3RD FLOOR</strong></div>
-        <div><small>SCORE</small><strong id="score">0000</strong></div>
-      </div>
+<div class="stats">
+  <div>
+    <small>TIME LEFT</small>
+    <strong id="timer">04:30</strong>
+  </div>
+  <div>
+    <small>FLOOR</small>
+    <strong id="floor-display">3RD FLOOR</strong>
+  </div>
+  <div>
+    <small>SCORE</small>
+    <strong id="score">0000</strong>
+  </div>
+</div>
     </header>
 
     <aside class="mission-panel">
       <p class="eyebrow">CURRENT LOCATION</p>
-      <h2 id="location-name">THIRD FLOOR</h2>
+      <h2 id="location-name">3RD FLOOR</h2>
       <p id="floor-description">Explore the school.</p>
       <div class="panel-divider"></div>
       <h3>YOUR OBJECTIVES</h3>

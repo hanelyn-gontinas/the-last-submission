@@ -55,7 +55,7 @@ let gameFinished = false;
 let pointerLocked = false;
 
 let score = 0;
-let timeLeft = 300;
+let timeLeft = 270;
 
 let activeInteraction = null;
 let nearbyObject = null;
@@ -2407,7 +2407,7 @@ function updateHUD() {
   const seconds = timeLeft % 60;
 
   $("timer").textContent =
-    `${String(seconds).padStart(2, "0")}`;
+    `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
 
   $("score").textContent = String(score).padStart(4, "0");
 
@@ -2416,11 +2416,13 @@ function updateHUD() {
     currentFloor === 2 ? "ND" : "ST";
 
   $("floor-display").textContent =
-    `${suffix} FLOOR`;
+    `${currentFloor}${suffix} FLOOR`;
 
   const info = floorInfo[currentFloor];
 
-  $("location-name").textContent = info.name;
+  $("location-name").textContent =
+    `${currentFloor}${suffix} FLOOR`;
+
   $("floor-description").textContent = info.description;
 
   const objectiveList = $("objective-list");
@@ -2457,6 +2459,8 @@ function updateHUD() {
 
   $("progress-fill").style.width =
     `${count / 3 * 100}%`;
+
+  $("progress-text").textContent = `${count} / 3`;
 }
 
 function showToast(message) {
@@ -3390,7 +3394,7 @@ function startGame() {
   completedTasks.clear();
 
   score = 0;
-  timeLeft = 300;
+  timeLeft = 270;
 
   currentFloor = 3;
 
@@ -3571,6 +3575,356 @@ $("close-interaction").addEventListener("click", () => {
   lockMouse();
 });
 
+
+// ============================================================
+// MOBILE / TOUCH CONTROLS
+// ============================================================
+
+const mobileStyle = document.createElement("style");
+
+mobileStyle.textContent = `
+.mobile-controls {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 15;
+  pointer-events: none;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.mobile-joystick {
+  position: absolute;
+  left: 24px;
+  bottom: 28px;
+  width: 132px;
+  height: 132px;
+  border-radius: 50%;
+  background: rgba(30, 30, 30, 0.30);
+  border: 2px solid rgba(255,255,255,0.65);
+  pointer-events: auto;
+  touch-action: none;
+}
+
+.mobile-stick {
+  position: absolute;
+  left: 39px;
+  top: 39px;
+  width: 50px;
+  height: 50px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.85);
+  border: 2px solid rgba(60,60,60,0.5);
+  box-shadow: 0 3px 10px rgba(0,0,0,0.3);
+  pointer-events: none;
+}
+
+.mobile-actions {
+  position: absolute;
+  right: 22px;
+  bottom: 32px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 13px;
+  pointer-events: auto;
+}
+
+.mobile-action-row {
+  display: flex;
+  gap: 12px;
+}
+
+.mobile-btn {
+  width: 62px;
+  height: 62px;
+  border-radius: 50%;
+  border: 2px solid rgba(255,255,255,0.8);
+  background: rgba(35,35,35,0.65);
+  color: white;
+  font-size: 12px;
+  font-weight: 900;
+  box-shadow: 0 3px 10px rgba(0,0,0,0.3);
+  touch-action: none;
+}
+
+.mobile-btn:active {
+  background: rgba(190,120,65,0.9);
+  transform: scale(0.94);
+}
+
+.mobile-btn.interact {
+  width: 72px;
+  height: 72px;
+  background: rgba(177,105,55,0.85);
+}
+
+.mobile-look-hint {
+  position: absolute;
+  right: 18px;
+  bottom: 185px;
+  color: white;
+  background: rgba(0,0,0,0.35);
+  padding: 7px 10px;
+  border-radius: 8px;
+  font-size: 10px;
+  pointer-events: none;
+}
+
+@media (pointer: coarse) {
+  .mobile-controls {
+    display: block;
+  }
+}
+
+@media (max-width: 600px) {
+  .mobile-joystick {
+    width: 112px;
+    height: 112px;
+    left: 15px;
+    bottom: 18px;
+  }
+
+  .mobile-stick {
+    left: 31px;
+    top: 31px;
+  }
+
+  .mobile-actions {
+    right: 14px;
+    bottom: 20px;
+    gap: 9px;
+  }
+
+  .mobile-btn {
+    width: 54px;
+    height: 54px;
+    font-size: 10px;
+  }
+
+  .mobile-btn.interact {
+    width: 65px;
+    height: 65px;
+  }
+
+  .mobile-look-hint {
+    bottom: 165px;
+    right: 12px;
+  }
+}
+`;
+
+document.head.appendChild(mobileStyle);
+
+const mobileControls = document.createElement("div");
+mobileControls.className = "mobile-controls";
+
+mobileControls.innerHTML = `
+  <div class="mobile-joystick" id="mobile-joystick">
+    <div class="mobile-stick" id="mobile-stick"></div>
+  </div>
+
+  <div class="mobile-look-hint">
+    SWIPE SCREEN TO LOOK
+  </div>
+
+  <div class="mobile-actions">
+    <button class="mobile-btn interact" id="mobile-interact">
+      INTERACT
+    </button>
+
+    <div class="mobile-action-row">
+      <button class="mobile-btn" id="mobile-jump">
+        JUMP
+      </button>
+
+      <button class="mobile-btn" id="mobile-pause">
+        PAUSE
+      </button>
+    </div>
+  </div>
+`;
+
+document.body.appendChild(mobileControls);
+
+// Show controls only while actively playing
+function updateMobileControls() {
+  const isTouchDevice =
+    window.matchMedia("(pointer: coarse)").matches ||
+    navigator.maxTouchPoints > 0;
+
+  mobileControls.style.display =
+    isTouchDevice &&
+    gameStarted &&
+    !gamePaused &&
+    !gameFinished &&
+    !activeInteraction
+      ? "block"
+      : "none";
+}
+
+// JOYSTICK
+const mobileJoystick = document.getElementById("mobile-joystick");
+const mobileStick = document.getElementById("mobile-stick");
+
+let joystickTouchId = null;
+let joystickCenterX = 0;
+let joystickCenterY = 0;
+
+function resetMobileJoystick() {
+  joystickTouchId = null;
+
+  keys.w = false;
+  keys.a = false;
+  keys.s = false;
+  keys.d = false;
+
+  mobileStick.style.transform = "translate(0px, 0px)";
+}
+
+mobileJoystick.addEventListener("touchstart", event => {
+  event.preventDefault();
+
+  const touch = event.changedTouches[0];
+
+  joystickTouchId = touch.identifier;
+
+  const rect = mobileJoystick.getBoundingClientRect();
+
+  joystickCenterX = rect.left + rect.width / 2;
+  joystickCenterY = rect.top + rect.height / 2;
+
+  updateJoystick(touch);
+}, { passive: false });
+
+mobileJoystick.addEventListener("touchmove", event => {
+  event.preventDefault();
+
+  for (const touch of event.changedTouches) {
+    if (touch.identifier === joystickTouchId) {
+      updateJoystick(touch);
+    }
+  }
+}, { passive: false });
+
+mobileJoystick.addEventListener("touchend", event => {
+  for (const touch of event.changedTouches) {
+    if (touch.identifier === joystickTouchId) {
+      resetMobileJoystick();
+    }
+  }
+});
+
+mobileJoystick.addEventListener("touchcancel", resetMobileJoystick);
+
+function updateJoystick(touch) {
+  const dx = touch.clientX - joystickCenterX;
+  const dy = touch.clientY - joystickCenterY;
+
+  const maxDistance = 38;
+  const distance = Math.hypot(dx, dy);
+  const scale = distance > maxDistance
+    ? maxDistance / distance
+    : 1;
+
+  const limitedX = dx * scale;
+  const limitedY = dy * scale;
+
+  mobileStick.style.transform =
+    `translate(${limitedX}px, ${limitedY}px)`;
+
+  keys.w = limitedY < -12;
+  keys.s = limitedY > 12;
+  keys.a = limitedX < -12;
+  keys.d = limitedX > 12;
+}
+
+// LOOK AROUND BY SWIPING THE GAME SCREEN
+let lookTouchId = null;
+let lastLookX = 0;
+let lastLookY = 0;
+
+renderer.domElement.addEventListener("touchstart", event => {
+  if (
+    !gameStarted ||
+    gamePaused ||
+    gameFinished ||
+    activeInteraction
+  ) return;
+
+  for (const touch of event.changedTouches) {
+    lookTouchId = touch.identifier;
+    lastLookX = touch.clientX;
+    lastLookY = touch.clientY;
+    break;
+  }
+}, { passive: true });
+
+renderer.domElement.addEventListener("touchmove", event => {
+  if (
+    lookTouchId === null ||
+    !gameStarted ||
+    gamePaused ||
+    gameFinished ||
+    activeInteraction
+  ) return;
+
+  for (const touch of event.changedTouches) {
+    if (touch.identifier !== lookTouchId) continue;
+
+    const dx = touch.clientX - lastLookX;
+    const dy = touch.clientY - lastLookY;
+
+    yaw -= dx * 0.006;
+    pitch -= dy * 0.006;
+
+    pitch = THREE.MathUtils.clamp(
+      pitch,
+      -Math.PI / 2.5,
+      Math.PI / 2.5
+    );
+
+    camera.rotation.set(pitch, yaw, 0);
+
+    lastLookX = touch.clientX;
+    lastLookY = touch.clientY;
+  }
+}, { passive: true });
+
+function endMobileLook(event) {
+  for (const touch of event.changedTouches) {
+    if (touch.identifier === lookTouchId) {
+      lookTouchId = null;
+    }
+  }
+}
+
+renderer.domElement.addEventListener("touchend", endMobileLook);
+renderer.domElement.addEventListener("touchcancel", endMobileLook);
+
+// MOBILE JUMP
+document.getElementById("mobile-jump")
+  .addEventListener("touchstart", event => {
+    event.preventDefault();
+    jump();
+  }, { passive: false });
+
+// MOBILE INTERACT
+document.getElementById("mobile-interact")
+  .addEventListener("touchstart", event => {
+    event.preventDefault();
+    interact();
+  }, { passive: false });
+
+// MOBILE PAUSE
+document.getElementById("mobile-pause")
+  .addEventListener("touchstart", event => {
+    event.preventDefault();
+    pauseGame();
+  }, { passive: false });
+
+
 // ============================================================
 // KEYBOARD CONTROLS
 // ============================================================
@@ -3640,8 +3994,9 @@ function animate() {
 
   movePlayer(delta);
 
-  updateDoors(delta);
+  updateMobileControls();
 
+  updateDoors(delta);
   updatePrompt();
 
   renderer.render(scene, camera);
