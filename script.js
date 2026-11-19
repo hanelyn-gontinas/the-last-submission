@@ -44,6 +44,10 @@ const FLOOR_Y = {
 let currentFloor = 3;
 let buildingFloor = 3;
 
+let teacherHitEffectTime = 0;
+let teacherShakeTime = 0;
+let teacherHitCooldown = 0;
+
 let playerPosition = new THREE.Vector3(0, PLAYER_HEIGHT, 4.8);
 
 let yaw = Math.PI;
@@ -54,8 +58,23 @@ let gamePaused = false;
 let gameFinished = false;
 let pointerLocked = false;
 
+let teacherChaseCooldown = 0;
+let nextTeacherToChase = "teacherA";
 let score = 0;
-let timeLeft = 270;
+let timeLeft = 510;
+let lives = 3;
+
+let carriedDocuments = null;
+const acceptedFavors = new Set();
+const completedFavors = new Set();
+const favorRewards = {};
+let watchExamInterval = null;
+let watchExamTimeLeft = 30;
+
+let examArrivalInterval = null;
+let examArrivalTimeLeft = 10;
+
+let teacherCItemCollected = false;
 
 let activeInteraction = null;
 let nearbyObject = null;
@@ -71,9 +90,13 @@ let stairBlockedNotice = false;
 const GRAVITY = 18;
 const JUMP_FORCE = 6.5;
 
+const examStudents = [];
+
 const keys = {};
 const colliders = [];
 const interactables = [];
+const ambientNPCs = [];
+const movingTeachers = [];
 const doors = [];
 const seatSpots = [];
 let seatedOnChair = false;
@@ -991,30 +1014,791 @@ function makeOfficeSupplies(x, baseY, z) {
   });
 }
 
-function makeNPC(x, baseY, z, shirtColor = 0x536c82) {
+
+function updateTeacherHitEffect(delta) {
+
+  if (teacherHitCooldown > 0) {
+    teacherHitCooldown -= delta;
+  }
+
+  if (teacherHitEffectTime > 0) {
+    teacherHitEffectTime -= delta;
+  }
+
+  if (teacherShakeTime > 0) {
+    teacherShakeTime -= delta;
+
+    const intensity = 0.055 * (
+      teacherShakeTime / 0.25
+    );
+
+    camera.position.x +=
+      (Math.random() - 0.5) * intensity;
+
+    camera.position.y +=
+      (Math.random() - 0.5) * intensity;
+
+  }
+
+  const flash = $("teacher-hit-flash");
+
+  if (flash) {
+    flash.style.opacity =
+      teacherHitEffectTime > 0 ? "1" : "0";
+  }
+}
+
+
+function triggerTeacherCatch(teacher) {
+
+  if (teacherHitCooldown > 0) return;
+
+  teacherHitCooldown = 2;
+
+  // TIME PENALTY
+  timeLeft = Math.max(0, timeLeft - 2);
+  updateHUD();
+
+  // SCREEN EFFECT
+  teacherHitEffectTime = 0.35;
+  teacherShakeTime = 0.25;
+
+  // POKE ANIMATION TRIGGER
+  teacher.pokeTime = 0.25;
+
+  showToast("TEACHER CAUGHT YOU! -2 SECONDS");
+
+  if (timeLeft <= 0) {
+    finishGame(false);
+  }
+}
+
+function makeNPC(
+  x,
+  baseY,
+  z,
+  shirtColor = 0x536c82,
+  appearance = {}
+) {
+  const npc = new THREE.Group();
+
+  const shirtMat = mat(shirtColor);
+  const pantsMat = mat(0x303747);
+  const shoeMat = mat(0x252525);
+  const skinMat = M.skin;
+  const hairMat = M.hair;
+  const eyeWhiteMat = mat(0xffffff);
+  const pupilMat = mat(0x211b19);
+  const browMat = mat(0x30251f);
+  const mouthMat = mat(0x713f3b);
+
+  // BODY
   const body = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.27, 0.34, 0.9, 16),
+    new THREE.CylinderGeometry(0.27, 0.34, 0.9, 20),
+    shirtMat
+  );
+  body.position.y = 0.98;
+  body.castShadow = true;
+  npc.add(body);
+
+  // NECK
+  const neck = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.075, 0.09, 0.18, 12),
+    skinMat
+  );
+  neck.position.y = 1.47;
+  npc.add(neck);
+
+  // HEAD
+  const head = new THREE.Mesh(
+    new THREE.SphereGeometry(0.235, 24, 24),
+    skinMat
+  );
+  head.position.set(0, 1.64, 0);
+  npc.add(head);
+
+  // EARS
+  for (const side of [-1, 1]) {
+    const ear = new THREE.Mesh(
+      new THREE.SphereGeometry(0.065, 14, 14),
+      skinMat
+    );
+    ear.position.set(side * 0.225, 1.63, 0);
+    ear.scale.set(0.75, 1, 0.65);
+    npc.add(ear);
+  }
+
+  // EYES
+  for (const side of [-1, 1]) {
+    const eye = new THREE.Mesh(
+      new THREE.SphereGeometry(0.052, 16, 16),
+      eyeWhiteMat
+    );
+    eye.position.set(side * 0.085, 1.665, 0.205);
+    eye.scale.set(1, 0.82, 0.45);
+    npc.add(eye);
+
+    const pupil = new THREE.Mesh(
+      new THREE.SphereGeometry(0.025, 12, 12),
+      pupilMat
+    );
+    pupil.position.set(side * 0.085, 1.66, 0.229);
+    npc.add(pupil);
+
+    const eyebrow = new THREE.Mesh(
+      new THREE.BoxGeometry(0.09, 0.018, 0.025),
+      browMat
+    );
+    eyebrow.position.set(side * 0.085, 1.735, 0.205);
+    eyebrow.rotation.z = side * -0.08;
+    npc.add(eyebrow);
+  }
+
+  // NOSE
+  const nose = new THREE.Mesh(
+    new THREE.SphereGeometry(0.035, 12, 12),
+    skinMat
+  );
+  nose.position.set(0, 1.605, 0.235);
+  nose.scale.set(0.8, 1.1, 0.75);
+  npc.add(nose);
+
+  // MOUTH
+  const mouth = new THREE.Mesh(
+    new THREE.SphereGeometry(0.045, 16, 12),
+    mouthMat
+  );
+  mouth.position.set(0, 1.535, 0.215);
+  mouth.scale.set(1.1, 0.25, 0.25);
+  npc.add(mouth);
+
+  // HAIR CAP
+  const hair = new THREE.Mesh(
+    new THREE.SphereGeometry(
+      0.245, 24, 18, 0, Math.PI * 2, 0, Math.PI / 2
+    ),
+    hairMat
+  );
+  hair.position.set(0, 1.72, -0.005);
+  npc.add(hair);
+
+  // SIDE HAIR
+  if (appearance.longHair || appearance.wavyHair || appearance.tiedBack) {
+    for (const side of [-1, 1]) {
+      const strand = new THREE.Mesh(
+        new THREE.BoxGeometry(0.10, 0.48, 0.16),
+        hairMat
+      );
+      strand.position.set(side * 0.19, 1.43, -0.015);
+      npc.add(strand);
+    }
+
+    const backHair = new THREE.Mesh(
+      new THREE.BoxGeometry(0.40, 0.58, 0.17),
+      hairMat
+    );
+    backHair.position.set(0, 1.40, -0.13);
+    npc.add(backHair);
+  }
+
+  // BANGS
+  if (appearance.bangs) {
+    const bangs = new THREE.Mesh(
+      new THREE.BoxGeometry(0.34, 0.13, 0.12),
+      hairMat
+    );
+    bangs.position.set(0, 1.68, 0.19);
+    npc.add(bangs);
+  }
+
+  // CURLY HAIR
+  if (appearance.curlyHair) {
+    const curlPositions = [
+      [-0.18, 1.78, 0.02],
+      [-0.09, 1.84, 0.04],
+      [0, 1.86, 0.04],
+      [0.09, 1.84, 0.04],
+      [0.18, 1.78, 0.02],
+      [-0.20, 1.68, 0.08],
+      [0.20, 1.68, 0.08],
+      [-0.12, 1.75, 0.16],
+      [0, 1.79, 0.19],
+      [0.12, 1.75, 0.16]
+    ];
+
+    for (const p of curlPositions) {
+      const curl = new THREE.Mesh(
+        new THREE.SphereGeometry(0.075, 12, 12),
+        hairMat
+      );
+      curl.position.set(p[0], p[1], p[2]);
+      npc.add(curl);
+    }
+  }
+
+  // TIED-BACK HAIR
+  if (appearance.tiedBack) {
+    const bun = new THREE.Mesh(
+      new THREE.SphereGeometry(0.13, 14, 14),
+      hairMat
+    );
+    bun.position.set(0, 1.68, -0.24);
+    npc.add(bun);
+  }
+
+  // WAVY HAIR
+  if (appearance.wavyHair) {
+    for (const side of [-1, 1]) {
+      const wave = new THREE.Mesh(
+        new THREE.BoxGeometry(0.12, 0.58, 0.14),
+        hairMat
+      );
+      wave.position.set(side * 0.20, 1.40, 0.02);
+      wave.rotation.z = side * 0.08;
+      npc.add(wave);
+    }
+  }
+
+  // GLASSES
+  if (appearance.glasses) {
+    const glassesMat = mat(0x242424);
+
+    for (const side of [-1, 1]) {
+      const lens = new THREE.Mesh(
+        new THREE.TorusGeometry(0.058, 0.009, 8, 20),
+        glassesMat
+      );
+      lens.position.set(side * 0.085, 1.665, 0.235);
+      npc.add(lens);
+    }
+
+    const bridge = new THREE.Mesh(
+      new THREE.BoxGeometry(0.055, 0.012, 0.018),
+      glassesMat
+    );
+    bridge.position.set(0, 1.665, 0.235);
+    npc.add(bridge);
+  }
+
+  // MOLES
+  function createMole(side, position) {
+    const mole = new THREE.Mesh(
+      new THREE.SphereGeometry(0.018, 10, 10),
+      mat(0x30201a)
+    );
+
+    mole.position.set(
+      side === "left" ? -0.14 : 0.14,
+      position === "forehead" ? 1.77 : 1.57,
+      0.22
+    );
+
+    npc.add(mole);
+  }
+
+  if (appearance.mole) {
+    createMole(
+      appearance.moleSide || "left",
+      appearance.molePosition || "cheek"
+    );
+  }
+
+  if (appearance.moles) {
+    appearance.moles.forEach(mole => {
+      createMole(mole.side, mole.position);
+    });
+  }
+
+  // HAIR CLIP
+  if (appearance.hairClip) {
+    const clip = new THREE.Mesh(
+      new THREE.BoxGeometry(0.075, 0.025, 0.035),
+      mat(0xd5b46a, 0.35, { metalness: 0.45 })
+    );
+    clip.position.set(0.17, 1.76, 0.12);
+    npc.add(clip);
+  }
+
+  // ARMS
+  for (const side of [-1, 1]) {
+    const arm = new THREE.Mesh(
+      new THREE.CapsuleGeometry(0.075, 0.32, 4, 10),
+      shirtMat
+    );
+    arm.position.set(side * 0.31, 1.02, 0);
+    arm.rotation.z = side * -0.10;
+    npc.add(arm);
+
+    const hand = new THREE.Mesh(
+      new THREE.SphereGeometry(0.075, 12, 12),
+      skinMat
+    );
+    hand.position.set(side * 0.34, 0.78, 0.015);
+    npc.add(hand);
+  }
+
+  // LEGS
+  for (const side of [-1, 1]) {
+    const leg = new THREE.Mesh(
+      new THREE.CapsuleGeometry(0.085, 0.34, 4, 10),
+      pantsMat
+    );
+    leg.position.set(side * 0.13, 0.36, 0);
+    npc.add(leg);
+
+    const shoe = new THREE.Mesh(
+      new THREE.BoxGeometry(0.17, 0.10, 0.27),
+      shoeMat
+    );
+    shoe.position.set(side * 0.13, 0.08, 0.055);
+    npc.add(shoe);
+  }
+
+  npc.position.set(x, baseY, z);
+  npc.rotation.y = appearance.rotationY ?? 0;
+  scene.add(npc);
+
+if (!appearance.noCollider) {
+  addCollider(x, z, 0.65, 0.65);
+}
+
+return npc;
+}
+
+function makeAmbientNPC(
+  x,
+  baseY,
+  z,
+  shirtColor = 0x536c82,
+  options = {}
+) {
+  const npc = new THREE.Group();
+
+  // BODY
+  const body = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.25, 0.31, 0.85, 12),
     mat(shirtColor)
   );
-
-  body.position.set(x, baseY + 0.98, z);
+  body.position.y = 0.98;
   body.castShadow = true;
+  npc.add(body);
 
-  scene.add(body);
-
+  // HEAD
   const head = new THREE.Mesh(
-    new THREE.SphereGeometry(0.23, 18, 18),
+    new THREE.SphereGeometry(0.22, 14, 14),
+    M.skin
+  );
+  head.position.y = 1.58;
+  npc.add(head);
+
+  // HAIR
+  const hair = new THREE.Mesh(
+    new THREE.SphereGeometry(
+      0.23, 14, 10, 0, Math.PI * 2, 0, Math.PI / 2
+    ),
+    M.hair
+  );
+  hair.position.y = 1.68;
+  npc.add(hair);
+
+    // FACE — EYES, EYEBROWS, NOSE, AND MOUTH
+  const eyeWhite = mat(0xffffff);
+  const pupilMat = mat(0x211b19);
+  const browMat = mat(0x30251f);
+  const mouthMat = mat(0x713f3b);
+
+  for (const side of [-1, 1]) {
+    const eye = new THREE.Mesh(
+      new THREE.SphereGeometry(0.045, 12, 12),
+      eyeWhite
+    );
+
+    eye.position.set(side * 0.078, 1.59, 0.195);
+    eye.scale.set(1, 0.85, 0.45);
+    npc.add(eye);
+
+    const pupil = new THREE.Mesh(
+      new THREE.SphereGeometry(0.022, 10, 10),
+      pupilMat
+    );
+
+    pupil.position.set(side * 0.078, 1.585, 0.216);
+    npc.add(pupil);
+
+    const brow = new THREE.Mesh(
+      new THREE.BoxGeometry(0.085, 0.014, 0.02),
+      browMat
+    );
+
+    brow.position.set(side * 0.078, 1.65, 0.19);
+    npc.add(brow);
+
+    const ear = new THREE.Mesh(
+      new THREE.SphereGeometry(0.05, 10, 10),
+      M.skin
+    );
+
+    ear.position.set(side * 0.215, 1.58, 0);
+    npc.add(ear);
+  }
+
+  const nose = new THREE.Mesh(
+    new THREE.SphereGeometry(0.028, 10, 10),
     M.skin
   );
 
-  head.position.set(x, baseY + 1.62, z);
-  scene.add(head);
+  nose.position.set(0, 1.55, 0.215);
+  npc.add(nose);
 
+  const mouth = new THREE.Mesh(
+    new THREE.SphereGeometry(0.035, 12, 10),
+    mouthMat
+  );
+
+  mouth.position.set(0, 1.49, 0.195);
+  mouth.scale.set(1.1, 0.25, 0.3);
+  npc.add(mouth);
+
+  // LEFT LEG
+  const leftLeg = new THREE.Mesh(
+    new THREE.BoxGeometry(0.15, 0.42, 0.16),
+    mat(0x303747)
+  );
+  leftLeg.position.set(-0.13, 0.38, 0);
+  npc.add(leftLeg);
+
+  // RIGHT LEG
+  const rightLeg = new THREE.Mesh(
+    new THREE.BoxGeometry(0.15, 0.42, 0.16),
+    mat(0x303747)
+  );
+  rightLeg.position.set(0.13, 0.38, 0);
+  npc.add(rightLeg);
+
+  // LEFT ARM
+  const leftArm = new THREE.Group();
+  leftArm.position.set(-0.29, 1.30, 0);
+
+  const leftArmMesh = new THREE.Mesh(
+    new THREE.BoxGeometry(0.14, 0.48, 0.14),
+    mat(shirtColor)
+  );
+  leftArmMesh.position.y = -0.22;
+  leftArm.add(leftArmMesh);
+  npc.add(leftArm);
+
+  // RIGHT ARM
+  const rightArm = new THREE.Group();
+  rightArm.position.set(0.29, 1.30, 0);
+
+  const rightArmMesh = new THREE.Mesh(
+    new THREE.BoxGeometry(0.14, 0.48, 0.14),
+    mat(shirtColor)
+  );
+  rightArmMesh.position.y = -0.22;
+  rightArm.add(rightArmMesh);
+  npc.add(rightArm);
+
+  // BACKPACK
+  if (options.backpack) {
+    const bag = new THREE.Mesh(
+      new THREE.BoxGeometry(0.32, 0.42, 0.16),
+      mat(0x343d50)
+    );
+    bag.position.set(0, 0.98, -0.27);
+    npc.add(bag);
+  }
+
+  // BOOK
+  if (options.book) {
+    const book = new THREE.Mesh(
+      new THREE.BoxGeometry(0.22, 0.28, 0.035),
+      mat(0x9b7657)
+    );
+    book.position.set(0.28, 1.12, 0.12);
+    npc.add(book);
+  }
+
+  npc.position.set(x, baseY, z);
+  npc.rotation.y = options.rotationY ?? 0;
+  scene.add(npc);
+
+  ambientNPCs.push({
+    group: npc,
+    body: body,
+    head: head,
+    leftLeg: leftLeg,
+    rightLeg: rightLeg,
+    leftArm: leftArm,
+    rightArm: rightArm,
+    walking: options.walking || false,
+    talking: options.talking || false,
+    direction: options.direction || 1,
+    speed: options.speed || 0.65,
+    minZ: options.minZ ?? z - 3,
+    maxZ: options.maxZ ?? z + 3,
+    baseY: baseY,
+    baseRotationY: npc.rotation.y,
+    idleTime: Math.random() * Math.PI * 2,
+    pauseTimer: 0,
+    pauseDuration: options.pauseDuration ?? 1.2,
+    animationSpeed: 0.75 + Math.random() * 0.6,
+
+    // RANDOM IDLE ACTION
+    idleActionTimer: 2 + Math.random() * 4,
+    idleAction: 0,
+    idleActionDuration: 0,
+    idleHeadOffset: 0
+  });
+
+  return npc;
+}
+
+
+function updateExamStudents(delta) {
+
+  if (
+    !gameStarted ||
+    gamePaused ||
+    gameFinished ||
+    currentFloor !== 2
+  ) return;
+
+  const elapsed = performance.now() / 1000;
+
+  for (const student of examStudents) {
+
+    const t = elapsed * student.speed + student.phase;
+
+    // WRITING ARM MOVEMENT
+    student.arms[0].rotation.x =
+      Math.sin(t * 3) * 0.08;
+
+    student.arms[1].rotation.x =
+      Math.sin(t * 3 + 0.5) * 0.08;
+
+    // PENCIL MOVEMENT
+    student.pencil.rotation.z =
+      Math.sin(t * 3) * 0.12;
+
+    student.pencil.position.y =
+      0.91 + Math.sin(t * 3) * 0.012;
+
+    // OCCASIONAL HEAD MOVEMENT
+    student.head.rotation.x =
+      Math.sin(t * 0.7) * 0.045;
+
+    student.head.rotation.y =
+      Math.sin(t * 0.45) * 0.035;
+  }
+}
+
+
+function updateAmbientNPCs(delta) {
+  for (const npc of ambientNPCs) {
+    npc.idleTime += delta;
+
+    const time = npc.idleTime;
+    const variation = npc.animationSpeed || 1;
+
+    // WALKING NPCs
+    if (npc.walking) {
+      if (npc.pauseTimer > 0) {
+        npc.pauseTimer -= delta;
+
+        npc.leftLeg.rotation.x = 0;
+        npc.rightLeg.rotation.x = 0;
+        npc.leftArm.rotation.x = 0;
+        npc.rightArm.rotation.x = 0;
+
+        continue;
+      }
+
+      npc.group.position.z +=
+        npc.direction * npc.speed * delta;
+
+      if (npc.group.position.z >= npc.maxZ) {
+        npc.group.position.z = npc.maxZ;
+        npc.direction = -1;
+        npc.pauseTimer = npc.pauseDuration;
+      }
+
+      if (npc.group.position.z <= npc.minZ) {
+        npc.group.position.z = npc.minZ;
+        npc.direction = 1;
+        npc.pauseTimer = npc.pauseDuration;
+      }
+
+      npc.group.rotation.y =
+        npc.direction === 1 ? 0 : Math.PI;
+
+      const walkCycle = time * 7 * variation;
+
+      npc.leftLeg.rotation.x =
+        Math.sin(walkCycle) * 0.45;
+
+      npc.rightLeg.rotation.x =
+        Math.sin(walkCycle + Math.PI) * 0.45;
+
+      npc.leftArm.rotation.x =
+        Math.sin(walkCycle + Math.PI) * 0.4;
+
+      npc.rightArm.rotation.x =
+        Math.sin(walkCycle) * 0.4;
+
+      npc.group.position.y =
+        npc.baseY +
+        Math.abs(Math.sin(walkCycle)) * 0.045;
+
+      continue;
+    }
+
+    // RANDOM IDLE ACTION TIMER
+    npc.idleActionTimer -= delta;
+
+    if (npc.idleActionTimer <= 0) {
+      npc.idleAction = Math.random() < 0.5 ? -1 : 1;
+      npc.idleActionDuration = 0.8 + Math.random() * 1.2;
+      npc.idleActionTimer = 3 + Math.random() * 5;
+    }
+
+    if (npc.idleActionDuration > 0) {
+      npc.idleActionDuration -= delta;
+    } else {
+      npc.idleAction = 0;
+    }
+
+    npc.idleHeadOffset +=
+      (npc.idleAction * 0.18 - npc.idleHeadOffset) *
+      Math.min(delta * 3, 1);
+
+    // SITTING NPCs
+    if (npc.sitting) {
+      npc.body.rotation.z =
+        Math.sin(time * 1.5 * variation) * 0.025;
+
+      npc.head.rotation.y =
+        Math.sin(time * 1.2 * variation) * 0.12 +
+        npc.idleHeadOffset;
+
+      npc.head.rotation.x =
+        Math.sin(time * 0.9 * variation) * 0.035;
+
+      npc.leftArm.rotation.x =
+        Math.sin(time * 1.4 * variation) * 0.08;
+
+      npc.rightArm.rotation.x =
+        Math.sin(time * 1.4 * variation + Math.PI) * 0.08;
+
+      npc.group.rotation.y =
+        npc.baseRotationY +
+        Math.sin(time * 0.7 * variation) * 0.025;
+
+      continue;
+    }
+
+    // STANDING NPCs
+    npc.group.position.y =
+      npc.baseY +
+      Math.sin(time * 1.5 * variation) * 0.025;
+
+    npc.head.rotation.y =
+      npc.idleHeadOffset +
+      Math.sin(time * 1.2 * variation) * 0.08;
+
+    npc.head.rotation.x =
+      Math.sin(time * 0.9 * variation) * 0.025;
+
+    npc.leftArm.rotation.x =
+      Math.sin(time * 1.5 * variation) * 0.06;
+
+    npc.rightArm.rotation.x =
+      Math.sin(time * 1.5 * variation + Math.PI) * 0.06;
+
+    // TALKING NPCs
+    if (npc.talking) {
+      npc.body.rotation.z =
+        Math.sin(time * 3 * variation) * 0.045;
+
+      npc.head.rotation.y +=
+        Math.sin(time * 2 * variation) * 0.12;
+
+      npc.leftArm.rotation.x =
+        Math.sin(time * 3 * variation) * 0.22;
+
+      npc.rightArm.rotation.x =
+        Math.sin(time * 3 * variation + Math.PI) * 0.22;
+    }
+
+    // SLIGHT BODY ROTATION
+    npc.group.rotation.y =
+      npc.baseRotationY +
+      Math.sin(time * 0.8 * variation) * 0.04;
+  }
+}
+
+function makeSittingAmbientNPC(
+  x,
+  baseY,
+  z,
+  shirtColor = 0x547b83,
+  rotationY = 0
+) {
+  const group = new THREE.Group();
+
+  // BENCH SEAT
+  const seat = new THREE.Mesh(
+    new THREE.BoxGeometry(1.3, 0.12, 0.42),
+    mat(0x76563e)
+  );
+
+  seat.position.y = 0.55;
+  group.add(seat);
+
+  // BENCH BACKREST
+  const back = new THREE.Mesh(
+    new THREE.BoxGeometry(1.3, 0.65, 0.12),
+    mat(0x76563e)
+  );
+
+  back.position.set(0, 0.88, -0.2);
+  group.add(back);
+
+  // BENCH LEGS
+  for (const side of [-0.48, 0.48]) {
+    const leg = new THREE.Mesh(
+      new THREE.BoxGeometry(0.1, 0.55, 0.1),
+      mat(0x493c30)
+    );
+
+    leg.position.set(side, 0.27, 0);
+    group.add(leg);
+  }
+
+  // BODY
+  const body = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.25, 0.3, 0.72, 12),
+    mat(shirtColor)
+  );
+
+  body.position.set(0, 1.0, -0.02);
+  group.add(body);
+
+  // HEAD
+  const head = new THREE.Mesh(
+    new THREE.SphereGeometry(0.22, 14, 14),
+    M.skin
+  );
+
+  head.position.set(0, 1.52, 0.04);
+  group.add(head);
+
+  // HAIR
   const hair = new THREE.Mesh(
     new THREE.SphereGeometry(
-      0.24,
-      18,
-      12,
+      0.23,
+      14,
+      10,
       0,
       Math.PI * 2,
       0,
@@ -1023,11 +1807,185 @@ function makeNPC(x, baseY, z, shirtColor = 0x536c82) {
     M.hair
   );
 
-  hair.position.set(x, baseY + 1.71, z);
-  scene.add(hair);
+  hair.position.set(0, 1.62, 0.04);
+  group.add(hair);
 
-  addCollider(x, z, 0.65, 0.65);
+  // LEFT ARM
+  const leftArm = new THREE.Group();
+  leftArm.position.set(-0.27, 1.25, 0.02);
+
+  const leftArmMesh = new THREE.Mesh(
+    new THREE.BoxGeometry(0.14, 0.4, 0.14),
+    mat(shirtColor)
+  );
+
+  leftArmMesh.position.y = -0.18;
+  leftArm.add(leftArmMesh);
+  group.add(leftArm);
+
+  // RIGHT ARM
+  const rightArm = new THREE.Group();
+  rightArm.position.set(0.27, 1.25, 0.02);
+
+  const rightArmMesh = new THREE.Mesh(
+    new THREE.BoxGeometry(0.14, 0.4, 0.14),
+    mat(shirtColor)
+  );
+
+  rightArmMesh.position.y = -0.18;
+  rightArm.add(rightArmMesh);
+  group.add(rightArm);
+
+  // LEGS
+  for (const side of [-0.13, 0.13]) {
+    const leg = new THREE.Mesh(
+      new THREE.BoxGeometry(0.16, 0.48, 0.16),
+      mat(0x303747)
+    );
+
+    leg.position.set(side, 0.48, 0.22);
+    leg.rotation.x = -0.35;
+    group.add(leg);
+  }
+
+  group.position.set(x, baseY, z);
+  group.rotation.y = rotationY;
+
+  scene.add(group);
+
+  ambientNPCs.push({
+    group: group,
+    body: body,
+    head: head,
+    leftArm: leftArm,
+    rightArm: rightArm,
+    walking: false,
+    sitting: true,
+    baseY: baseY,
+    baseRotationY: rotationY,
+    idleTime: Math.random() * Math.PI * 2,
+    animationSpeed: 0.75 + Math.random() * 0.6,
+
+    // RANDOM IDLE ACTION
+    idleActionTimer: 2 + Math.random() * 4,
+    idleAction: 0,
+    idleActionDuration: 0,
+    idleHeadOffset: 0
+  });
+
+  return group;
 }
+
+function buildAmbientNPCs(floor, baseY) {
+
+  // THIRD FLOOR
+  if (floor === 3) {
+    makeAmbientNPC(-1.5, baseY, -11, 0x547b83, {
+      walking: true,
+      speed: 0.55,
+      minZ: -14,
+      maxZ: -7,
+      backpack: true
+    });
+
+    makeAmbientNPC(1.5, baseY, 2, 0x826a91, {
+      walking: true,
+      speed: 0.7,
+      minZ: -1,
+      maxZ: 6,
+      book: true
+    });
+
+    makeAmbientNPC(-1.2, baseY, -3, 0x9b7657);
+    makeAmbientNPC(-0.5, baseY, -3.5, 0x55745f);
+  }
+
+  // SECOND FLOOR
+  if (floor === 2) {
+
+    // WALKING STUDENT — LEFT SIDE
+    makeAmbientNPC(-1.5, baseY, -12, 0x98765b, {
+      walking: true,
+      speed: 0.6,
+      minZ: -14,
+      maxZ: -6,
+      backpack: true
+    });
+
+    // WALKING STUDENT — RIGHT SIDE
+    makeAmbientNPC(1.5, baseY, 1, 0x547b83, {
+      walking: true,
+      speed: 0.75,
+      minZ: -3,
+      maxZ: 7,
+      book: true
+    });
+
+// WALKING STUDENT — END OF HALLWAY
+makeAmbientNPC(0, baseY, 2, 0x826a91, {
+  walking: true,
+  speed: 0.45,
+  minZ: 0,
+  maxZ: 4,
+  backpack: true
+});
+
+    // STUDENTS TALKING
+    makeAmbientNPC(-1.5, baseY, -1.8, 0x55745f, {
+      rotationY: Math.PI / 2,
+      talking: true
+    });
+
+    makeAmbientNPC(-1.5, baseY, -3.1, 0xb97849, {
+      rotationY: -Math.PI / 2,
+      talking: true
+    });
+
+// STUDENTS SITTING IN THE HALLWAY
+
+// BLUE SHIRT — ROTATE RIGHT
+makeSittingAmbientNPC(
+  -3.2,
+  baseY,
+  5,
+  0x547b83,
+  Math.PI / 2
+);
+
+// PURPLE SHIRT — ROTATE LEFT
+makeSittingAmbientNPC(
+  3.2,
+  baseY,
+  5,
+  0x826a91,
+  -Math.PI / 2
+);
+  }
+
+  // FIRST FLOOR
+  if (floor === 1) {
+    makeAmbientNPC(-1.5, baseY, -10, 0x55745f, {
+      walking: true,
+      speed: 0.7,
+      minZ: -14,
+      maxZ: -5,
+      backpack: true
+    });
+
+    makeAmbientNPC(1.5, baseY, 2, 0x98765b, {
+      walking: true,
+      speed: 0.6,
+      minZ: -3,
+      maxZ: 8,
+      book: true
+    });
+
+    makeAmbientNPC(-1.2, baseY, -1, 0x826a91);
+    makeAmbientNPC(-0.5, baseY, -1.5, 0x547b83);
+    makeAmbientNPC(1.2, baseY, 10, 0xb97849);
+  }
+}
+
 
 // ============================================================
 // DOORS
@@ -1155,7 +2113,7 @@ function createDoor(floor, side, z, label) {
     z,
     title: label,
     description: "A classroom door. Press E to open or close it.",
-    id: `door-side-{z}`,
+id: `door-${floor}-${side}-${z}`,
     kind: "door",
     door
   });
@@ -1354,16 +2312,17 @@ const floorInfo = {
     ]
   },
 
-  2: {
-    name: "SECOND FLOOR",
-    description: "Find your groupmates and collect the missing research documents.",
+2: {
+  name: "SECOND FLOOR",
+  description: "Find your four groupmates and collect their contributions for thesis printing.",
 
-    tasks: [
-      ["Get the first groupmate's contribution", "groupmate1"],
-      ["Get the second groupmate's contribution", "groupmate2"],
-      ["Organize the final thesis document", "thesis"]
-    ]
-  },
+  tasks: [
+    ["Get Kristine's contribution", "kristine"],
+    ["Get Enir's contribution", "enir"],
+    ["Get Jio's contribution", "jio"],
+    ["Get Rovelin's contribution", "rovelin"]
+  ]
+},
 
   1: {
     name: "FIRST FLOOR",
@@ -1396,6 +2355,179 @@ function addInteractable(
     kind
   });
 }
+
+// ============================================================
+// MOVING TEACHERS
+// ============================================================
+
+function registerMovingTeacher(id, group, interaction) {
+  movingTeachers.push({
+    id,
+    group,
+    interaction,
+    speed: 1.8,
+    stopDistance: 1.75,
+    triggerDistance: 9,
+    stopped: false,
+    contactCooldown: 0
+  });
+}
+
+
+function stopTeacherApproach(id) {
+  const teacher = movingTeachers.find(
+    item => item.id === id
+  );
+
+  if (teacher) {
+    teacher.stopped = true;
+  }
+}
+
+function removeCompletedTeacher(id) {
+  const teacherIndex = movingTeachers.findIndex(
+    item => item.id === id
+  );
+
+  if (teacherIndex === -1) return;
+
+  const teacher = movingTeachers[teacherIndex];
+
+  // Remove teacher's 3D model
+  scene.remove(teacher.group);
+
+  // Remove teacher from moving teachers list
+  movingTeachers.splice(teacherIndex, 1);
+
+  // Remove teacher's interaction
+  const interactionIndex = interactables.indexOf(
+    teacher.interaction
+  );
+
+  if (interactionIndex !== -1) {
+    interactables.splice(interactionIndex, 1);
+  }
+}
+
+function showTeacherHitEffect() {
+
+  let effect = document.getElementById("teacher-hit-effect");
+
+  if (!effect) {
+
+    effect = document.createElement("div");
+    effect.id = "teacher-hit-effect";
+
+    document.body.appendChild(effect);
+  }
+
+  effect.classList.remove("hit-active");
+
+  // Restart animation
+  void effect.offsetWidth;
+
+  effect.classList.add("hit-active");
+}
+
+
+
+function updateMovingTeachers(delta) {
+
+  if (
+    !gameStarted ||
+    gamePaused ||
+    gameFinished ||
+    currentFloor !== 2 ||
+    activeInteraction
+  ) return;
+
+  // WAIT AFTER THE PREVIOUS FAVOR
+  if (teacherChaseCooldown > 0) {
+    teacherChaseCooldown -= delta;
+
+    if (teacherChaseCooldown <= 0) {
+      teacherChaseCooldown = 0;
+
+      const nextTeacher = movingTeachers.find(
+        teacher => teacher.id === nextTeacherToChase
+      );
+
+      if (nextTeacher) {
+        nextTeacher.stopped = false;
+      }
+    }
+
+    return;
+  }
+
+  // ONLY THE ASSIGNED TEACHER CAN CHASE
+  const teacher = movingTeachers.find(
+    item =>
+      item.id === nextTeacherToChase &&
+      !item.stopped
+  );
+
+  if (!teacher) return;
+
+  const group = teacher.group;
+
+  const dx = playerPosition.x - group.position.x;
+  const dz = playerPosition.z - group.position.z;
+
+  const distance = Math.hypot(dx, dz);
+
+  if (distance > teacher.triggerDistance) return;
+
+  // FACE PLAYER
+  group.rotation.y = Math.atan2(dx, dz);
+
+  // APPROACH PLAYER
+  if (distance > teacher.stopDistance) {
+
+    const movement = Math.min(
+      teacher.speed * delta,
+      distance - teacher.stopDistance
+    );
+
+    group.position.x += (dx / distance) * movement;
+    group.position.z += (dz / distance) * movement;
+  }
+
+  // UPDATE INTERACTION POSITION
+  teacher.interaction.x = group.position.x;
+  teacher.interaction.z = group.position.z;
+
+  // TEACHER CATCH DETECTION
+  const catchDistance = Math.hypot(
+    playerPosition.x - group.position.x,
+    playerPosition.z - group.position.z
+  );
+
+  if (catchDistance <= teacher.stopDistance + 0.15) {
+    triggerTeacherCatch(teacher);
+  }
+}
+
+function startTeacherChaseCooldown(completedTeacherId) {
+
+  if (completedTeacherId === "teacherA") {
+    nextTeacherToChase = "teacherB";
+  }
+
+  else if (completedTeacherId === "teacherB") {
+    nextTeacherToChase = "teacherC";
+  }
+
+  else if (completedTeacherId === "teacherC") {
+    nextTeacherToChase = null;
+  }
+
+  teacherChaseCooldown = 5;
+
+  showToast("NEXT TEACHER APPROACHING IN 5 SECONDS...");
+}
+
+
 
 // ============================================================
 // CEILING
@@ -1730,6 +2862,161 @@ for (const side of [-1, 1]) {
 // ORGANIZED FURNITURE
 // ============================================================
 
+// ============================================================
+// EXAMINATION STUDENT
+// ============================================================
+
+
+function makeExamStudent(
+  x,
+  baseY,
+  z,
+  shirtColor = 0x547b83
+) {
+
+  const student = new THREE.Group();
+
+  const shirtMat = mat(shirtColor);
+  const pantsMat = mat(0x303747);
+  const skinMat = M.skin;
+  const hairMat = M.hair;
+
+  // SEATED BODY
+  const body = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.23, 0.28, 0.68, 16),
+    shirtMat
+  );
+
+  body.position.y = 1.0;
+  student.add(body);
+
+  // HEAD PIVOT
+  const headGroup = new THREE.Group();
+  headGroup.position.set(0, 1.52, 0);
+  student.add(headGroup);
+
+  const head = new THREE.Mesh(
+    new THREE.SphereGeometry(0.21, 18, 18),
+    skinMat
+  );
+
+  headGroup.add(head);
+
+  // HAIR
+  const hair = new THREE.Mesh(
+    new THREE.SphereGeometry(
+      0.22, 16, 14, 0, Math.PI * 2, 0, Math.PI / 2
+    ),
+    hairMat
+  );
+
+  hair.position.set(0, 0.08, -0.01);
+  headGroup.add(hair);
+
+  // EYES
+  for (const side of [-1, 1]) {
+
+    const eye = new THREE.Mesh(
+      new THREE.SphereGeometry(0.035, 10, 10),
+      mat(0xffffff)
+    );
+
+    eye.position.set(side * 0.07, 0.01, 0.18);
+    headGroup.add(eye);
+
+    const pupil = new THREE.Mesh(
+      new THREE.SphereGeometry(0.018, 8, 8),
+      mat(0x211b19)
+    );
+
+    pupil.position.set(side * 0.07, 0.01, 0.198);
+    headGroup.add(pupil);
+  }
+
+  // SEATED LEGS
+  for (const side of [-1, 1]) {
+
+    const thigh = new THREE.Mesh(
+      new THREE.BoxGeometry(0.16, 0.16, 0.42),
+      pantsMat
+    );
+
+    thigh.position.set(side * 0.12, 0.58, 0.18);
+    student.add(thigh);
+
+    const lowerLeg = new THREE.Mesh(
+      new THREE.BoxGeometry(0.13, 0.38, 0.14),
+      pantsMat
+    );
+
+    lowerLeg.position.set(side * 0.12, 0.32, 0.40);
+    student.add(lowerLeg);
+  }
+
+  // ANIMATED ARMS
+  const arms = [];
+
+  for (const side of [-1, 1]) {
+
+    const armGroup = new THREE.Group();
+
+    armGroup.position.set(
+      side * 0.22,
+      1.02,
+      0.22
+    );
+
+    const arm = new THREE.Mesh(
+      new THREE.CapsuleGeometry(0.055, 0.28, 4, 8),
+      shirtMat
+    );
+
+    arm.position.set(0, -0.04, 0.05);
+    arm.rotation.x = -0.9;
+    armGroup.add(arm);
+
+    const hand = new THREE.Mesh(
+      new THREE.SphereGeometry(0.055, 10, 10),
+      skinMat
+    );
+
+    hand.position.set(-side * 0.03, -0.12, 0.17);
+    armGroup.add(hand);
+
+    student.add(armGroup);
+    arms.push(armGroup);
+  }
+
+  // ANIMATED PENCIL
+  const pencil = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.012, 0.012, 0.30, 8),
+    mat(0xe2bd48)
+  );
+
+  pencil.position.set(0.17, 0.91, 0.43);
+  pencil.rotation.x = Math.PI / 2;
+  student.add(pencil);
+
+  // FACE THE DESK
+  student.position.set(x, baseY, z);
+  student.rotation.y = Math.PI;
+
+  scene.add(student);
+
+  // SAVE ANIMATION REFERENCES
+  examStudents.push({
+    group: student,
+    arms,
+    head: headGroup,
+    pencil,
+    phase: Math.random() * Math.PI * 2,
+    speed: 2 + Math.random() * 1.5
+  });
+
+  return student;
+}
+
+
 function buildFloorFurniture(floor, baseY) {
 
   // ==================================================
@@ -1916,6 +3203,35 @@ function buildFloorFurniture(floor, baseY) {
 
     makeFloorPaper(6.8, baseY, 9.8, 0.3);
     makeFloorPaper(9.1, baseY, 12.0, -0.2);
+
+
+    // TWO STUDENTS WALKING TOGETHER
+    makeAmbientNPC(
+      -0.45, baseY, 5,
+      0x547b83,
+      {
+        walking: true,
+        direction: 1,
+        speed: 0.55,
+        minZ: 2,
+        maxZ: 8,
+        backpack: true
+      }
+    );
+
+    makeAmbientNPC(
+      0.45, baseY, 5,
+      0x826a91,
+      {
+        walking: true,
+        direction: 1,
+        speed: 0.55,
+        minZ: 2,
+        maxZ: 8,
+        book: true
+      }
+    );
+
   }
 
 
@@ -1940,42 +3256,112 @@ function buildFloorFurniture(floor, baseY) {
     makeCabinet(-4.8, baseY, -5.0);
     makePlant(-9.0, baseY, -4.7);
 
+// ==================================================
+// ROOM 204 — CLASSROOM / EXAMINATION ROOM
+// ==================================================
 
-    // ROOM 202 — GROUP STUDY ROOM
+makeWhiteboard(7.0, baseY, -14.7);
 
-    makeWhiteboard(7.0, baseY, -14.7);
+// FIRST ROW
+makeDesk(5.5, baseY, -10.5, 1.5);
+makePaper(5.5, baseY, -10.5);
 
-    makeDesk(5.5, baseY, -10.5, 1.5);
-    makeChair(5.5, baseY, -9.25, 0x547b83);
+makeDesk(8.3, baseY, -10.5, 1.5);
+makePaper(8.3, baseY, -10.5, 0.15);
 
-    makeDesk(8.3, baseY, -10.5, 1.5);
-    makeChair(8.3, baseY, -9.25, 0x826a91);
+// SECOND ROW
+makeDesk(5.5, baseY, -8.0, 1.5);
+makePaper(5.5, baseY, -8.0, 0.2);
 
-    makeDesk(5.5, baseY, -5.6, 1.5);
-    makeChair(5.5, baseY, -4.35);
+makeDesk(8.3, baseY, -8.0, 1.5);
+makePaper(8.3, baseY, -8.0, -0.15);
 
-    makeDesk(8.3, baseY, -5.6, 1.5);
-    makeChair(8.3, baseY, -4.35);
+// EXAM STUDENTS — SEATED IN FRONT OF THEIR DESKS
+makeExamStudent(
+  5.5, baseY, -9.25,
+  0x547b83
+);
 
-    makeBookshelf(9.0, baseY, -13.1);
-    makePlant(5.0, baseY, -13.1);
+makeExamStudent(
+  8.3, baseY, -9.25,
+  0x826a91
+);
 
-    makeNPC(-6.2, baseY, -7.0, 0x547b83);
-    makeNPC(6.2, baseY, -7.0, 0x826a91);
+makeExamStudent(
+  5.5, baseY, -6.75,
+  0x55745f
+);
 
-    addInteractable(
-      2, -6.2, -7.0,
-      "FIRST GROUPMATE",
-      "Your first groupmate has the research background and related literature section.",
-      "groupmate1", "npc"
-    );
+makeExamStudent(
+  8.3, baseY, -6.75,
+  0xb97849
+);
 
-    addInteractable(
-      2, 6.2, -7.0,
-      "SECOND GROUPMATE",
-      "Your second groupmate has the methodology and data gathering notes.",
-      "groupmate2", "npc"
-    );
+// CLASSROOM FURNITURE
+makeBookshelf(9.0, baseY, -13.1);
+makePlant(5.0, baseY, -13.1);
+
+// ==================================================
+// ROOM 202 — GROUP STUDY ROOM
+// ==================================================
+
+// GROUP STUDY TABLE
+makeDesk(-6.2, baseY, 3.0, 2.2);
+
+// FOUR CHAIRS
+makeChair(-7.5, baseY, 4.25);
+makeChair(-4.9, baseY, 4.25);
+makeChair(-7.5, baseY, 1.75);
+makeChair(-4.9, baseY, 1.75);
+
+// STUDY MATERIALS
+makePaper(-6.2, baseY, 3.0);
+makeFolder(-6.7, baseY, 3.0);
+makeOfficeSupplies(-5.8, baseY, 3.0);
+
+// ADDITIONAL FURNITURE
+makeBookshelf(-9.0, baseY, 4.0);
+makeWhiteboard(-7.0, baseY, 5.0, Math.PI);
+makeComputer(-8.0, baseY, 2.0);
+makePlant(-9.0, baseY, 1.0);
+
+    // KRISTINE — GIRL, SHORT BLACK HAIR
+    makeNPC(-6.2, baseY, -7.0, 0x547b83, {
+      longHair: false
+    });
+
+// ENIR — ROOM 202
+makeNPC(-6.2, baseY, 0, 0x826a91, {
+  curlyHair: true,
+  glasses: true
+});
+
+    // JIO — BOY, TWO DISTINCTIVE MOLES
+    makeNPC(-3.5, baseY, -7.0, 0x52665c, {
+      moles: [
+        { side: "left", position: "cheek" },
+        { side: "right", position: "forehead" }
+      ]
+    });
+
+    // ROVELIN — GIRL, LONG BLACK HAIR WITH HAIR CLIP
+    makeNPC(3.5, baseY, -7.0, 0x98765b, {
+      longHair: true,
+      hairClip: true
+    });
+
+    // GROUPMATE INTERACTABLES
+    addInteractable(2, -6.2, -7.0, "KRISTINE", "Hi! Here's my contribution for our thesis printing expenses.", "kristine", "npc");
+
+addInteractable(
+  2, -6.2, 0,
+  "ENIR",
+  "Here's my share for the thesis printing expenses!",
+  "enir", "npc"
+);
+    addInteractable(2, -3.5, -7.0, "JIO", "I brought my contribution. Good luck with the submission!", "jio", "npc");
+
+    addInteractable(2, 3.5, -7.0, "ROVELIN", "Here's my contribution. Let's finish our thesis!", "rovelin", "npc");
 
 
     // ROOM 203 — FACULTY ROOM / THESIS REVIEW
@@ -1999,13 +3385,236 @@ function buildFloorFurniture(floor, baseY) {
     makeOfficeSupplies(8.3, baseY, 7.8);
     makePlant(9.0, baseY, 5.2);
 
-    addInteractable(
-      2, 6.2, 2.8,
-      "THESIS DOCUMENT",
-      "A folder with the group's final research files is on the study table.",
-      "thesis", "document"
-    );
+    // ADDITIONAL FACULTY ROOM FURNITURE
+makeBookshelf(9.0, baseY, 3.5);
+makeCabinet(9.0, baseY, 11.0);
+
+// TEACHER A
+const teacherAVisual = makeNPC(
+  5.3, baseY, 8.0, 0x536c82,
+  {
+    rotationY: Math.PI,
+    noCollider: true
   }
+);
+
+addInteractable(
+  2, 5.3, 8.0,
+  "TEACHER A",
+  "Can you help me deliver these documents to Room 205?",
+  "teacherA", "teacher"
+);
+
+registerMovingTeacher(
+  "teacherA",
+  teacherAVisual,
+  interactables[interactables.length - 1]
+);
+
+
+// TEACHER B
+const teacherBVisual = makeNPC(
+  8.3, baseY, 8.0, 0x55745f,
+  {
+    rotationY: Math.PI,
+    noCollider: true
+  }
+);
+
+addInteractable(
+  2, 8.3, 8.0,
+  "TEACHER B",
+  "Can you watch the examination room for a little while?",
+  "teacherB", "teacher"
+);
+
+registerMovingTeacher(
+  "teacherB",
+  teacherBVisual,
+  interactables[interactables.length - 1]
+);
+
+
+// TEACHER C
+const teacherCVisual = makeNPC(
+  7.0, baseY, 12.0, 0xb97849,
+  {
+    rotationY: Math.PI,
+    noCollider: true
+  }
+);
+
+addInteractable(
+  2, 7.0, 12.0,
+  "TEACHER C",
+  "Could you get an office item for me? Please pick it up from my office and bring it back to me.",
+  "teacherC", "teacher"
+);
+
+registerMovingTeacher(
+  "teacherC",
+  teacherCVisual,
+  interactables[interactables.length - 1]
+);
+
+// ROOM 205 — DOCUMENT DELIVERY TABLE
+makeDesk(7.0, baseY, 0, 1.8);
+makeFolder(7.0, baseY, 0);
+
+// ROOM 205 — DOCUMENT DELIVERY
+addInteractable(
+  2,
+  7.0,
+  0,
+  "ROOM 205 — DOCUMENT DELIVERY",
+  "You found the correct room. Deliver Teacher A's documents here.",
+  "room205Delivery",
+  "favorTarget"
+);
+
+
+// ROOM 204 — EXAMINATION ROOM WATCH
+addInteractable(
+  2,
+  7.0,
+  -9.0,
+  "ROOM 204 — EXAMINATION ROOM",
+  "Stay inside the examination room for 30 seconds.",
+  "room204Watch",
+  "favorTarget"
+);
+
+
+// ROOM 206 — TEACHER C OFFICE ITEM
+addInteractable(
+  2,
+  5.3,
+  10.4,
+  "OFFICE ITEM",
+  "Pick up the office item requested by Teacher C.",
+  "teacherCItem",
+  "favorTarget"
+);
+
+// STUDENTS READING NOTES
+makeAmbientNPC(
+  -1.2,
+  baseY,
+  6,
+  0x98765b,
+  {
+    book: true,
+    backpack: true
+  }
+);
+
+makeAmbientNPC(
+  1.2,
+  baseY,
+  6,
+  0x826a91,
+  {
+    book: true
+  }
+);
+
+// STUDENTS TALKING
+makeAmbientNPC(-1.3, baseY, -2, 0x55745f, {
+  rotationY: Math.PI / 2
+});
+
+makeAmbientNPC(-0.6, baseY, -2.5, 0xb97849, {
+  rotationY: -Math.PI / 2
+});
+
+
+    // STUDENTS WAITING IN THE HALLWAY
+    makeAmbientNPC(
+      -1.2,
+      baseY,
+      3,
+      0x536c82,
+      {
+        rotationY: Math.PI,
+        backpack: true
+      }
+    );
+
+    makeAmbientNPC(
+      1.2,
+      baseY,
+      3.5,
+      0xb97849,
+      {
+        rotationY: Math.PI,
+        book: true
+      }
+    );
+
+        // FIVE DECOY STUDENTS
+    // These are NOT the correct groupmates.
+
+    makeNPC(-1.35, baseY, -12, 0x9b7657, {
+      bangs: true
+    });
+
+    addInteractable(
+      2, -1.35, -12,
+      "STUDENT",
+      "Hello! Do you need something?",
+      "decoy1",
+      "decoy"
+    );
+
+    makeNPC(1.35, baseY, -9.5, 0x55745f, {
+      curlyHair: true
+    });
+
+    addInteractable(
+      2, 1.35, -9.5,
+      "STUDENT",
+      "Hi! I'm just waiting for my class.",
+      "decoy2",
+      "decoy"
+    );
+
+    makeNPC(-1.35, baseY, -5, 0x826a91, {
+      longHair: true
+    });
+
+    addInteractable(
+      2, -1.35, -5,
+      "STUDENT",
+      "Sorry, I don't have the thesis contribution.",
+      "decoy3",
+      "decoy"
+    );
+
+    makeNPC(1.35, baseY, 0, 0xb97849, {
+      glasses: true
+    });
+
+    addInteractable(
+      2, 1.35, 0,
+      "STUDENT",
+      "Are you looking for someone?",
+      "decoy4",
+      "decoy"
+    );
+
+    makeNPC(1.35, baseY, -5, 0x536c82, {
+      tiedBack: true
+    });
+
+    addInteractable(
+      2, 1.35, -5,
+      "STUDENT",
+      "I think you have the wrong person.",
+      "decoy5",
+      "decoy"
+    );
+
+}
 
 
   // ==================================================
@@ -2085,6 +3694,10 @@ function buildFloorFurniture(floor, baseY) {
       "submission", "submission"
     );
   }
+
+  // CREATE AMBIENT NPCs FOR THE CURRENT FLOOR
+   buildAmbientNPCs(floor, baseY);
+
 }
 
 // ============================================================
@@ -2457,10 +4070,14 @@ function updateHUD() {
     completedTasks.has(task[1])
   ).length;
 
-  $("progress-fill").style.width =
-    `${count / 3 * 100}%`;
+  const total = info.tasks.length;
 
-  $("progress-text").textContent = `${count} / 3`;
+  $("progress-fill").style.width =
+    `${count / total * 100}%`;
+
+  $("progress-text").textContent = `${count} / ${total}`;
+
+  $("lives").textContent = String(lives);
 }
 
 function showToast(message) {
@@ -2813,14 +4430,470 @@ function standFromInteractionSeat() {
   currentSeat = null;
 }
 
+function openTeacherInteraction(item) {
+  activeInteraction = item;
+
+  if (document.pointerLockElement === renderer.domElement) {
+    document.exitPointerLock();
+  }
+
+  pointerLocked = false;
+  document.body.classList.add("cursor-visible");
+
+  $("interaction-category").textContent = "OPTIONAL TEACHER FAVOR";
+  $("interaction-title").textContent = item.title;
+
+  const accepted = acceptedFavors.has(item.id);
+  const completed = completedFavors.has(item.id);
+
+  if (completed) {
+    $("interaction-description").textContent =
+      "Thank you for helping me! I appreciate your effort.";
+
+    $("interaction-extra").innerHTML = `
+      <p>FAVOR COMPLETED!</p>
+    `;
+
+  } else if (accepted) {
+    let message = "You already accepted this favor. Complete the requested task first!";
+
+    if (item.id === "teacherC" && teacherCItemCollected) {
+      message = "You already have the item. Please return it to me!";
+    }
+
+    $("interaction-description").textContent = message;
+
+    $("interaction-extra").innerHTML = `
+      <p>FAVOR ACCEPTED — NOT YET COMPLETED</p>
+    `;
+
+  } else {
+    $("interaction-description").textContent = item.description;
+
+    $("interaction-extra").innerHTML = `
+      <button id="accept-favor" class="primary-button">
+        ACCEPT
+      </button>
+
+      <button id="decline-favor" class="secondary-button">
+        DECLINE
+      </button>
+    `;
+
+$("accept-favor").addEventListener("click", () => {
+
+  acceptedFavors.add(item.id);
+
+  // Stop the teacher from following the player.
+  stopTeacherApproach(item.id);
+
+  if (item.id === "teacherA") {
+    showCarriedDocuments();
+
+    showToast(
+      "DOCUMENTS RECEIVED! Go to Room 205 and place them on the table."
+    );
+  }
+
+  if (item.id === "teacherB") {
+    startExamArrivalCountdown();
+  }
+
+  if (item.id === "teacherC") {
+    showToast(
+      "FAVOR ACCEPTED! Go to Room 206 and retrieve the office item."
+    );
+  }
+
+  activeInteraction = null;
+
+  $("interaction-screen").classList.add("hidden");
+  $("interaction-extra").classList.add("hidden");
+
+  standFromInteractionSeat();
+  lockMouse();
+});
+
+    $("decline-favor").addEventListener("click", () => {
+      activeInteraction = null;
+
+      $("interaction-screen").classList.add("hidden");
+      $("interaction-extra").classList.add("hidden");
+
+      standFromInteractionSeat();
+      lockMouse();
+
+      showToast("FAVOR DECLINED. No penalty!");
+    });
+  }
+
+  $("interaction-extra").classList.remove("hidden");
+  $("interaction-screen").classList.remove("hidden");
+}
+
+function showCarriedDocuments() {
+
+  // Remove old documents if they already exist.
+  if (carriedDocuments) {
+    camera.remove(carriedDocuments);
+  }
+
+  carriedDocuments = new THREE.Group();
+
+  const paperMaterial = new THREE.MeshStandardMaterial({
+    color: 0xf5f1df,
+    roughness: 0.9
+  });
+
+  const lineMaterial = new THREE.MeshStandardMaterial({
+    color: 0x667788,
+    roughness: 1
+  });
+
+  // MAIN DOCUMENT
+  const paper = new THREE.Mesh(
+    new THREE.PlaneGeometry(0.30, 0.40),
+    paperMaterial
+  );
+
+  paper.position.z = 0;
+  carriedDocuments.add(paper);
+
+  // SECOND DOCUMENT
+  const secondPaper = new THREE.Mesh(
+    new THREE.PlaneGeometry(0.30, 0.40),
+    paperMaterial
+  );
+
+  secondPaper.position.set(0.025, -0.015, -0.008);
+  secondPaper.rotation.z = 0.08;
+  carriedDocuments.add(secondPaper);
+
+  // DOCUMENT LINES
+  for (let i = 0; i < 5; i++) {
+
+    const line = new THREE.Mesh(
+      new THREE.PlaneGeometry(0.19, 0.006),
+      lineMaterial
+    );
+
+    line.position.set(
+      -0.015,
+      0.10 - i * 0.045,
+      0.002
+    );
+
+    carriedDocuments.add(line);
+  }
+
+  // Position the documents in front of the player.
+  carriedDocuments.position.set(
+    0.38,
+    -0.32,
+    -0.85
+  );
+
+  carriedDocuments.rotation.set(
+    -0.25,
+    -0.15,
+    -0.12
+  );
+
+  camera.add(carriedDocuments);
+}
+
+function giveTeacherReward(teacherId) {
+
+  const rewards = ["time", "hint", "thanks"];
+
+  const reward = rewards[
+    Math.floor(Math.random() * rewards.length)
+  ];
+
+  favorRewards[teacherId] = reward;
+
+  // REWARD 1 — EXTRA TIME
+  if (reward === "time") {
+
+    timeLeft += 30;
+
+    updateHUD();
+
+    showRewardPopup(
+      "FAVOR COMPLETED!",
+      "+30 SECONDS<br>Thank you for your help!"
+    );
+  }
+
+  // REWARD 2 — GROUPMATE LOCATION HINT
+  else if (reward === "hint") {
+
+    const hints = {
+      kristine: "Kristine is in Room 201, near the front classroom area.",
+      enir: "Enir is in Room 202, the left-side middle room.",
+      jio: "Jio is in Room 201, near the front classroom area.",
+      rovelin: "Rovelin is in Room 204, the right-side front classroom."
+    };
+
+    const names = Object.keys(hints);
+
+    const randomName = names[
+      Math.floor(Math.random() * names.length)
+    ];
+
+    showRewardPopup(
+      "TEACHER'S HINT!",
+      hints[randomName]
+    );
+  }
+
+  // REWARD 3 — THANK YOU ONLY
+  else {
+
+    showRewardPopup(
+      "FAVOR COMPLETED!",
+      "THANK YOU FOR YOUR HELP! I REALLY APPRECIATE IT!"
+    );
+  }
+}
+
+function startExamArrivalCountdown() {
+
+  // Prevent duplicate countdowns.
+  if (examArrivalInterval) {
+    clearInterval(examArrivalInterval);
+    examArrivalInterval = null;
+  }
+
+  if (watchExamInterval) return;
+
+  examArrivalTimeLeft = 10;
+
+  showToast(
+    "HURRY! Reach Room 204 within 10 seconds!"
+  );
+
+  examArrivalInterval = setInterval(() => {
+
+    if (!gameStarted || gamePaused || gameFinished) {
+      return;
+    }
+
+    if (currentFloor === 2) {
+
+      const distance = Math.hypot(
+        camera.position.x - 7,
+        camera.position.z - (-9)
+      );
+
+      // PLAYER REACHED ROOM 204
+      if (distance <= 2.65) {
+
+        clearInterval(examArrivalInterval);
+        examArrivalInterval = null;
+
+        showToast(
+          "YOU MADE IT! Watch the students for 30 seconds!"
+        );
+
+        startExamWatch({
+          id: "room204Watch"
+        });
+
+        return;
+      }
+    }
+
+    examArrivalTimeLeft--;
+
+    if (examArrivalTimeLeft > 0) {
+
+      showToast(
+        `ROOM 204 DEADLINE: ${examArrivalTimeLeft} SECONDS LEFT!`
+      );
+
+    } else {
+
+      clearInterval(examArrivalInterval);
+      examArrivalInterval = null;
+
+// FAVOR FAILED — RESET TEACHER B
+acceptedFavors.delete("teacherB");
+
+const teacherB = movingTeachers.find(
+  teacher => teacher.id === "teacherB"
+);
+
+if (teacherB) {
+  teacherB.stopped = false;
+  teacherB.contactCooldown = 0;
+}
+
+showToast(
+  "TIME'S UP! TEACHER B IS LOOKING FOR YOU AGAIN!"
+);
+    }
+
+  }, 1000);
+}
+
+function showExamWatchHUD(time) {
+
+  let display = document.getElementById("exam-watch-hud");
+
+  if (!display) {
+
+    display = document.createElement("div");
+    display.id = "exam-watch-hud";
+
+    display.innerHTML = `
+      <div class="exam-watch-label">
+        EXAMINATION WATCH
+      </div>
+
+      <div id="exam-watch-countdown">
+        00:30
+      </div>
+
+      <div class="exam-watch-instruction">
+        STAY INSIDE ROOM 204
+      </div>
+    `;
+
+    document.body.appendChild(display);
+  }
+
+  const minutes = Math.floor(time / 60);
+  const seconds = time % 60;
+
+  document.getElementById("exam-watch-countdown").textContent =
+    `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+
+  display.classList.remove("hidden");
+}
+
+
+function hideExamWatchHUD() {
+
+  const display = document.getElementById("exam-watch-hud");
+
+  if (display) {
+    display.classList.add("hidden");
+  }
+}
+
 function openInteraction(item) {
   if (!item) return;
 
+  // DOORS
   if (item.kind === "door") {
     toggleDoor(item.door);
     return;
   }
 
+    // DECOY STUDENT — WRONG INTERACTION PENALTY
+  if (item.kind === "decoy") {
+    lives--;
+    timeLeft = Math.max(0, timeLeft - 10);
+
+    updateHUD();
+
+    if (lives <= 0) {
+      showToast("MISSION FAILED! NO LIVES LEFT.");
+      finishGame(false);
+      return;
+    }
+
+    if (timeLeft <= 0) {
+      finishGame(false);
+      return;
+    }
+
+    showToast("WRONG STUDENT! -1 LIFE AND -10 SECONDS.");
+    return;
+  }
+
+  // TEACHERS
+  if (item.kind === "teacher") {
+
+    // Teacher C: Return the collected office item
+    if (
+      item.id === "teacherC" &&
+      teacherCItemCollected &&
+      acceptedFavors.has("teacherC") &&
+      !completedFavors.has("teacherC")
+    ) {
+      activeInteraction = item;
+      completeInteraction();
+      return;
+    }
+
+    openTeacherInteraction(item);
+    return;
+  }
+
+
+  // OPTIONAL FAVOR TARGETS
+  if (item.kind === "favorTarget") {
+
+    // TEACHER A — ROOM 205
+    if (item.id === "room205Delivery") {
+      if (!acceptedFavors.has("teacherA")) {
+        showToast("Accept Teacher A's favor first!");
+        return;
+      }
+
+      if (completedFavors.has("teacherA")) {
+        showToast("You already delivered the documents!");
+        return;
+      }
+
+      activeInteraction = item;
+      completeInteraction();
+      return;
+    }
+
+    // TEACHER B — ROOM 204
+    if (item.id === "room204Watch") {
+      if (!acceptedFavors.has("teacherB")) {
+        showToast("Accept Teacher B's favor first!");
+        return;
+      }
+
+      if (completedFavors.has("teacherB")) {
+        showToast("You already completed the examination room watch!");
+        return;
+      }
+
+      startExamWatch(item);
+      return;
+    }
+
+    // TEACHER C — PICK UP OFFICE ITEM
+    if (item.id === "teacherCItem") {
+      if (!acceptedFavors.has("teacherC")) {
+        showToast("Accept Teacher C's favor first!");
+        return;
+      }
+
+      if (completedFavors.has("teacherC")) {
+        showToast("You already completed Teacher C's favor!");
+        return;
+      }
+
+      if (teacherCItemCollected) {
+        showToast("You already picked up the item. Return it to Teacher C!");
+        return;
+      }
+
+      activeInteraction = item;
+      completeInteraction();
+      return;
+    }
+  }
+
+
+  // REGULAR MISSION TASKS
   if (completedTasks.has(item.id)) {
     showToast("You already completed this task.");
     return;
@@ -2828,12 +4901,9 @@ function openInteraction(item) {
 
   activeInteraction = item;
 
-  sitAtInteractionSeat(item);
-
-if (document.pointerLockElement === renderer.domElement) {
-  document.exitPointerLock();
-}
-
+  if (item.kind !== "npc") {
+    sitAtInteractionSeat(item);
+  }
   if (document.pointerLockElement === renderer.domElement) {
     document.exitPointerLock();
   }
@@ -2857,8 +4927,164 @@ if (document.pointerLockElement === renderer.domElement) {
     taskDescriptions[item.kind] || item.description;
 
   $("interaction-screen").classList.remove("hidden");
+  $("interaction-extra").classList.remove("hidden");
+
+  // GROUPMATE CONTRIBUTION — NO QUIZ REQUIRED
+  if (item.kind === "npc") {
+    const extra = $("interaction-extra");
+
+    extra.innerHTML = `
+      <button
+        type="button"
+        class="challenge-next"
+        id="collect-contribution"
+      >
+        COLLECT CONTRIBUTION
+      </button>
+    `;
+
+    extra.classList.remove("hidden");
+
+    $("collect-contribution").addEventListener("click", () => {
+      completeInteraction();
+    });
+
+    return;
+  }
 
   renderChallenge();
+}
+
+
+function startExamWatch(item) {
+
+  // CHECK IF FAVOR WAS ACCEPTED
+  if (!acceptedFavors.has("teacherB")) {
+    showToast("Accept Teacher B's favor first!");
+    return;
+  }
+
+  // CHECK IF ALREADY COMPLETED
+  if (completedFavors.has("teacherB")) {
+    showToast("You already completed the examination watch!");
+    return;
+  }
+
+  // PREVENT DUPLICATE TIMER
+  if (watchExamInterval) {
+    showToast("You are already watching the examination room!");
+    return;
+  }
+
+  watchExamTimeLeft = 30;
+  showExamWatchHUD(watchExamTimeLeft);
+
+  activeInteraction = null;
+
+  $("interaction-screen").classList.add("hidden");
+  $("interaction-extra").classList.add("hidden");
+
+  standFromInteractionSeat();
+  lockMouse();
+
+  showToast(
+    "EXAMINATION WATCH STARTED! Stay inside Room 204 for 30 seconds."
+  );
+
+  watchExamInterval = setInterval(() => {
+
+    if (!gameStarted || gamePaused || gameFinished) {
+      return;
+    }
+
+    // CHECK IF PLAYER IS STILL INSIDE ROOM 204
+    const distance = Math.hypot(
+      camera.position.x - 7,
+      camera.position.z - (-9)
+    );
+
+    if (distance > 2.65) {
+      clearInterval(watchExamInterval);
+      watchExamInterval = null;
+
+      watchExamTimeLeft = 30;
+
+      showToast(
+        "EXAMINATION WATCH CANCELLED! Stay inside Room 204."
+      );
+
+      return;
+    }
+
+    // COUNTDOWN
+    watchExamTimeLeft--;
+    showExamWatchHUD(watchExamTimeLeft);
+    hideExamWatchHUD();
+
+    if (
+      watchExamTimeLeft > 0 &&
+      watchExamTimeLeft % 5 === 0
+    ) {
+      showToast(
+        `EXAMINATION WATCH: ${watchExamTimeLeft} SECONDS LEFT`
+      );
+    }
+
+    // COMPLETED
+    if (watchExamTimeLeft <= 0) {
+      clearInterval(watchExamInterval);
+      watchExamInterval = null;
+
+      completedFavors.add("teacherB");
+
+      startTeacherChaseCooldown("teacherB");
+
+      removeCompletedTeacher("teacherB");
+
+      giveTeacherReward("teacherB");
+
+      updateHUD();
+
+      showToast(
+        "EXAMINATION WATCH COMPLETED! Thank you for helping!"
+      );
+    }
+
+  }, 1000);
+}
+
+function showRewardPopup(title, message) {
+
+  let popup = document.getElementById("teacher-reward-popup");
+
+  if (!popup) {
+
+    popup = document.createElement("div");
+    popup.id = "teacher-reward-popup";
+
+    document.body.appendChild(popup);
+  }
+
+  popup.innerHTML = `
+    <div class="reward-card">
+      <div class="reward-icon">★</div>
+
+      <h2>${title}</h2>
+
+      <p>${message}</p>
+
+      <button id="reward-close-button">
+        CONTINUE
+      </button>
+    </div>
+  `;
+
+  popup.classList.remove("hidden");
+
+  document.getElementById("reward-close-button")
+    .addEventListener("click", () => {
+      popup.classList.add("hidden");
+    });
 }
 
 // ============================================================
@@ -2873,7 +5099,7 @@ function renderChallenge() {
 
   const objectiveNumber = getObjectiveNumber(activeInteraction);
 
-  if (objectiveNumber === 3) {
+  if (activeInteraction.id === "diagnostic") {
     renderWirePuzzle(container);
     return;
   }
@@ -3222,6 +5448,157 @@ function completeInteraction() {
 
   const item = activeInteraction;
 
+// TEACHER A — DOCUMENT DELIVERY
+if (item.id === "room205Delivery") {
+
+  if (!acceptedFavors.has("teacherA")) {
+    showToast("Accept Teacher A's favor first!");
+    return;
+  }
+
+  if (completedFavors.has("teacherA")) {
+    showToast("You already delivered the documents!");
+    return;
+  }
+
+  if (!carriedDocuments) {
+    showToast("You need to bring Teacher A's documents!");
+    return;
+  }
+
+  // Remove documents from player's view.
+  camera.remove(carriedDocuments);
+  carriedDocuments = null;
+
+  // Complete Teacher A's favor.
+  completedFavors.add("teacherA");
+
+  startTeacherChaseCooldown("teacherA");
+
+  removeCompletedTeacher("teacherA");
+
+  giveTeacherReward("teacherA");
+
+  activeInteraction = null;
+
+  $("interaction-screen").classList.add("hidden");
+  $("interaction-extra").classList.add("hidden");
+
+  standFromInteractionSeat();
+  lockMouse();
+
+  showToast(
+    "DOCUMENTS DELIVERED! Teacher A's favor completed!"
+  );
+
+  return;
+}
+
+  // TEACHER B — EXAMINATION ROOM WATCH
+if (item.id === "room204Watch") {
+
+  if (!acceptedFavors.has("teacherB")) {
+    showToast("Accept Teacher B's favor first!");
+    return;
+  }
+
+  if (watchExamInterval) {
+    showToast("You are already watching the examination room!");
+    return;
+  }
+
+  if (!examArrivalInterval) {
+    startExamArrivalCountdown();
+  } else {
+    showToast("Reach Room 204 before the countdown ends!");
+  }
+
+  return;
+}
+
+  // TEACHER C — PICK UP OFFICE ITEM
+if (item.id === "teacherCItem") {
+
+  if (!acceptedFavors.has("teacherC")) {
+    showToast("Accept Teacher C's favor first!");
+    return;
+  }
+
+  if (teacherCItemCollected) {
+    showToast("You already picked up the office item!");
+    return;
+  }
+
+  teacherCItemCollected = true;
+
+  showToast(
+    "OFFICE ITEM COLLECTED! Return it to Teacher C."
+  );
+
+  activeInteraction = null;
+
+  $("interaction-screen").classList.add("hidden");
+  $("interaction-extra").classList.add("hidden");
+
+  standFromInteractionSeat();
+  lockMouse();
+
+  return;
+}
+
+  // TEACHER C — RETURN OFFICE ITEM
+if (item.kind === "teacher" && item.id === "teacherC") {
+
+  if (!acceptedFavors.has("teacherC")) {
+    showToast("Accept Teacher C's favor first!");
+    return;
+  }
+
+  if (!teacherCItemCollected) {
+    showToast("Find and collect the office item first!");
+    return;
+  }
+
+  if (completedFavors.has("teacherC")) {
+    return;
+  }
+
+  teacherCItemCollected = false;
+
+  completedFavors.add("teacherC");
+
+startTeacherChaseCooldown("teacherC");
+
+  removeCompletedTeacher("teacherC");
+
+  giveTeacherReward("teacherC");
+
+  activeInteraction = null;
+
+  $("interaction-screen").classList.add("hidden");
+  $("interaction-extra").classList.add("hidden");
+
+  standFromInteractionSeat();
+  lockMouse();
+
+  showToast(
+    "OFFICE ITEM RETURNED! Teacher C's favor completed!"
+  );
+
+  return;
+}
+
+  // OTHER TEACHER FAVORS
+  if (item.kind === "teacher") {
+
+    if (!acceptedFavors.has(item.id)) return;
+
+    if (completedFavors.has(item.id)) return;
+
+    return;
+  }
+
+  // REGULAR MISSION TASKS
   if (completedTasks.has(item.id)) return;
 
   completedTasks.add(item.id);
@@ -3391,10 +5768,41 @@ document.addEventListener("mousemove", event => {
 // ============================================================
 
 function startGame() {
-  completedTasks.clear();
 
   score = 0;
-  timeLeft = 270;
+  timeLeft = 510;
+  lives = 3;
+
+  completedTasks.clear();
+  acceptedFavors.clear();
+  completedFavors.clear();
+
+  // RESET TEACHER CHASE SEQUENCE
+  teacherChaseCooldown = 0;
+  nextTeacherToChase = "teacherA";
+
+  // Reset teacher rewards
+  Object.keys(favorRewards).forEach(key => {
+    delete favorRewards[key];
+  });
+
+  // Reset Teacher C item
+  teacherCItemCollected = false;
+
+  // Reset Teacher B watch timer
+  watchExamTimeLeft = 30;
+
+  if (watchExamInterval) {
+    clearInterval(watchExamInterval);
+    watchExamInterval = null;
+  }
+
+  if (examArrivalInterval) {
+  clearInterval(examArrivalInterval);
+  examArrivalInterval = null;
+}
+
+examArrivalTimeLeft = 10;
 
   currentFloor = 3;
 
@@ -3462,6 +5870,11 @@ function finishGame(success) {
 
   clearInterval(timerInterval);
 
+  if (watchExamInterval) {
+    clearInterval(watchExamInterval);
+    watchExamInterval = null;
+  }
+
   if (document.pointerLockElement === renderer.domElement) {
     document.exitPointerLock();
   }
@@ -3476,16 +5889,20 @@ function finishGame(success) {
 
   $("result-screen").classList.remove("hidden");
 
+  const gameOverReason = lives <= 0 ? "NO LIVES LEFT" : "TIME'S UP";
+
   $("result-label").textContent =
-    success ? "MISSION COMPLETE" : "TIME'S UP";
+    success ? "MISSION COMPLETE" : gameOverReason;
 
   $("result-title").textContent =
     success ? "THESIS SUBMITTED!" : "DEADLINE MISSED";
 
   $("result-message").textContent =
     success
-      ? "You completed all nine objectives and submitted your thesis before the deadline."
-      : "The deadline has passed. You were unable to submit your thesis on time.";
+      ? "You completed all objectives and submitted your thesis before the deadline."
+      : lives <= 0
+        ? "You ran out of lives. Your mission has ended."
+        : "The deadline has passed. You were unable to submit your thesis on time.";
 
   $("final-score").textContent =
     String(score).padStart(4, "0");
@@ -3519,6 +5936,13 @@ function returnToMenu() {
   gameFinished = false;
 
   clearInterval(timerInterval);
+
+    if (watchExamInterval) {
+    clearInterval(watchExamInterval);
+    watchExamInterval = null;
+  }
+
+  watchExamTimeLeft = 30;
 
   if (document.pointerLockElement === renderer.domElement) {
     document.exitPointerLock();
@@ -3987,6 +6411,7 @@ window.addEventListener("blur", () => {
 // ANIMATION
 // ============================================================
 
+
 function animate() {
   requestAnimationFrame(animate);
 
@@ -3996,13 +6421,18 @@ function animate() {
 
   updateMobileControls();
 
-  updateDoors(delta);
-  updatePrompt();
+updateDoors(delta);
+updateAmbientNPCs(delta);
+updateMovingTeachers(delta);
+updateExamStudents(delta);
+updateTeacherHitEffect(delta);
+updatePrompt();
 
   renderer.render(scene, camera);
 }
 
 animate();
+
 
 // ============================================================
 // RESIZE

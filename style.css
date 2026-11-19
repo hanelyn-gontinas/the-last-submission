@@ -951,3 +951,158 @@ body {
     touch-action: manipulation;
   }
 }
+
+#teacher-hit-effect {
+  position: fixed;
+  inset: 0;
+  z-index: 9998;
+  pointer-events: none;
+  opacity: 0;
+  background: rgba(255, 0, 0, 0);
+}
+
+#teacher-hit-effect.hit-active {
+  animation: teacherHitFlash 0.35s ease-out;
+}
+
+@keyframes teacherHitFlash {
+  0% {
+    opacity: 0;
+    background: rgba(255, 0, 0, 0);
+  }
+
+  30% {
+    opacity: 1;
+    background: rgba(255, 0, 0, 0.38);
+  }
+
+  100% {
+    opacity: 0;
+    background: rgba(255, 0, 0, 0);
+  }
+}
+
+#exam-watch-hud {
+  position: fixed;
+  top: 18%;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 9997;
+
+  min-width: 250px;
+  padding: 16px 24px;
+
+  text-align: center;
+  color: white;
+
+  background: rgba(12, 18, 30, 0.92);
+  border: 2px solid #d6b65c;
+  border-radius: 14px;
+
+  pointer-events: none;
+}
+
+#exam-watch-hud.hidden {
+  display: none;
+}
+
+.exam-watch-label {
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: 2px;
+}
+
+#exam-watch-countdown {
+  margin: 8px 0;
+  font-size: 48px;
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+  color: #f4d36b;
+}
+
+.exam-watch-instruction {
+  font-size: 11px;
+  letter-spacing: 1.5px;
+  opacity: 0.85;
+}
+
+#teacher-reward-popup {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  background: rgba(0, 0, 0, 0.65);
+}
+
+#teacher-reward-popup.hidden {
+  display: none;
+}
+
+.reward-card {
+  width: min(380px, 85%);
+  padding: 28px 22px;
+
+  text-align: center;
+  color: white;
+
+  background: #202b3b;
+  border: 2px solid #d6b65c;
+  border-radius: 18px;
+
+  animation: rewardAppear 0.3s ease-out;
+}
+
+.reward-icon {
+  font-size: 42px;
+  color: #f4d36b;
+}
+
+.reward-card h2 {
+  font-size: 22px;
+  margin: 10px 0;
+}
+
+.reward-card p {
+  font-size: 17px;
+  line-height: 1.5;
+}
+
+.reward-card button {
+  margin-top: 18px;
+  padding: 11px 25px;
+
+  border: none;
+  border-radius: 8px;
+
+  background: #d6b65c;
+  color: #202b3b;
+
+  font-weight: 800;
+  cursor: pointer;
+}
+
+@keyframes rewardAppear {
+  from {
+    opacity: 0;
+    transform: scale(0.8);
+  }
+
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+#teacher-hit-flash {
+  position: fixed;
+  inset: 0;
+  background: rgba(255, 0, 0, 0.35);
+  opacity: 0;
+  pointer-events: none;
+  z-index: 9999;
+  transition: opacity 0.08s;
+}
