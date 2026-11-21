@@ -82,6 +82,8 @@ let securityGuard = null;
 let guardCatchCooldown = 0;
 let guardSafeTime = 0;
 let guardChasing = false;
+let guardMemoryTime = 0;
+let guardLastSeen = null;
 
 let activeInteraction = null;
 let nearbyObject = null;
@@ -1078,7 +1080,7 @@ function updateSecurityGuard(delta) {
   const facingDot = distance > 0
     ? (forwardX * dx + forwardZ * dz) / distance
     : 1;
-  const detectionRadius = keys.control ? 10.5 : 7.5;
+  const detectionRadius = keys.control ? 13 : 9;
   const canSeePlayer =
     guardSafeTime <= 0 &&
     !playerHidden &&
@@ -1088,13 +1090,55 @@ function updateSecurityGuard(delta) {
 
   if (canSeePlayer) {
     guardChasing = true;
-    securityGuard.rotation.y = Math.atan2(dx, dz);
+    guardMemoryTime = 7;
+    guardLastSeen = { x: playerPosition.x, z: playerPosition.z };
+  }
 
-    if (distance > 1.35) {
-      const speed = keys.control ? 2.8 : 2.35;
-      const movement = Math.min(speed * delta, distance - 1.35);
-      const nextX = securityGuard.position.x + (dx / distance) * movement;
-      const nextZ = securityGuard.position.z + (dz / distance) * movement;
+  if (playerHidden) {
+    guardMemoryTime = Math.max(0, guardMemoryTime - delta * 2);
+  } else if (guardChasing && !canSeePlayer) {
+    guardMemoryTime = Math.max(0, guardMemoryTime - delta);
+  }
+
+  if (guardChasing && guardMemoryTime > 0 && guardLastSeen) {
+    let targetX = guardLastSeen.x;
+    let targetZ = guardLastSeen.z;
+    const targetSide = Math.sign(targetX);
+
+    if (Math.abs(targetX) > 4.2) {
+      const roomDoor = doors
+        .filter(door => door.floor === 1 && Math.sign(door.x) === targetSide)
+        .sort((a, b) =>
+          Math.abs(a.z - targetZ) - Math.abs(b.z - targetZ)
+        )[0];
+
+      if (roomDoor) {
+        if (!roomDoor.open) {
+          roomDoor.open = true;
+          roomDoor.target = roomDoor.x < 0 ? Math.PI / 2 : -Math.PI / 2;
+        }
+
+        const enteredRoom =
+          Math.sign(securityGuard.position.x) === targetSide &&
+          Math.abs(securityGuard.position.x - roomDoor.x) > 0.9 &&
+          Math.abs(securityGuard.position.z - roomDoor.z) < 1.25;
+
+        if (!enteredRoom) {
+          targetX = roomDoor.x + targetSide * 1.0;
+          targetZ = roomDoor.z;
+        }
+      }
+    }
+
+    const chaseX = targetX - securityGuard.position.x;
+    const chaseZ = targetZ - securityGuard.position.z;
+    const chaseDistance = Math.hypot(chaseX, chaseZ);
+
+    if (chaseDistance > 0.15) {
+      securityGuard.rotation.y = Math.atan2(chaseX, chaseZ);
+      const movement = Math.min(3.1 * delta, chaseDistance);
+      const nextX = securityGuard.position.x + chaseX / chaseDistance * movement;
+      const nextZ = securityGuard.position.z + chaseZ / chaseDistance * movement;
 
       if (!blocked(nextX, securityGuard.position.z)) {
         securityGuard.position.x = nextX;
@@ -1109,7 +1153,7 @@ function updateSecurityGuard(delta) {
       playerPosition.z - securityGuard.position.z
     );
 
-    if (catchDistance <= 1.55 && guardCatchCooldown <= 0) {
+    if (!playerHidden && catchDistance <= 1.55 && guardCatchCooldown <= 0) {
       guardCatchCooldown = 3;
       guardSafeTime = 4;
       penalties++;
@@ -1123,6 +1167,8 @@ function updateSecurityGuard(delta) {
       securityGuard.position.set(0, FLOOR_Y[1], -2);
       securityGuard.patrolDirection = 1;
       guardChasing = false;
+      guardMemoryTime = 0;
+      guardLastSeen = null;
       updateHUD();
 
       if (lives <= 0 || timeLeft <= 0) {
@@ -1136,8 +1182,19 @@ function updateSecurityGuard(delta) {
   }
 
   if (guardChasing) {
-    securityGuard.position.x = 0;
     guardChasing = false;
+    guardLastSeen = null;
+  }
+
+  if (Math.abs(securityGuard.position.x) > 0.15) {
+    const returnStep = Math.sign(-securityGuard.position.x) * Math.min(2.2 * delta, Math.abs(securityGuard.position.x));
+    const returnX = securityGuard.position.x + returnStep;
+
+    if (!blocked(returnX, securityGuard.position.z)) {
+      securityGuard.position.x = returnX;
+    }
+
+    return;
   }
 
   if (typeof securityGuard.patrolDirection === "undefined") {
@@ -1994,6 +2051,31 @@ function makeSittingAmbientNPC(
 
 function buildAmbientNPCs(floor, baseY) {
 
+  if (floor === 2) {
+    const hallwayStudents = [
+      [-2.25, -12.2, 0x547b83, { backpack: true }],
+      [-1.25, -9.0, 0x826a91, { book: true }],
+      [1.25, -11.0, 0x52665c, { backpack: true }],
+      [2.25, -6.0, 0x98765b, { book: true }],
+      [-2.25, -3.2, 0x9b7657, { backpack: true }],
+      [-1.25, 0.2, 0x55745f, { book: true }],
+      [1.25, 3.8, 0xb97849, { backpack: true }],
+      [2.25, 5.7, 0x547b83, { book: true }]
+    ];
+
+    hallwayStudents.forEach(([x, z, shirtColor, accessories], index) => {
+      makeAmbientNPC(x, baseY, z, shirtColor, {
+        ...accessories,
+        walking: true,
+        direction: index % 2 === 0 ? 1 : -1,
+        speed: 0.42 + (index % 3) * 0.08,
+        minZ: Math.max(-14, z - 2.1),
+        maxZ: Math.min(7.1, z + 2.1),
+        pauseDuration: 0.7 + (index % 3) * 0.3
+      });
+    });
+  }
+
   // THIRD FLOOR
   if (floor === 3) {
     makeAmbientNPC(-1.5, baseY, -11, 0x547b83, {
@@ -2342,13 +2424,13 @@ const floorInfo = {
 
 2: {
   name: "SECOND FLOOR",
-  description: "Identify your four teammates and collect each thesis section. Faculty favors are optional; all four contributions unlock the stairs.",
+  description: "Find one teammate in each assigned room. Clear each room's distraction, then collect all four thesis sections to unlock the stairs.",
 
   tasks: [
-    ["Find Kristine in Classroom 201", "kristine"],
-    ["Collect Enir's contribution in Group Study Room 202", "enir"],
-    ["Collect Jio's contribution in Group Study Room 202", "jio"],
-    ["Collect Rovelin's contribution in Group Study Room 202", "rovelin"]
+    ["Help supervise class and collect Kristine's section — Room 201", "kristine"],
+    ["Recover Enir's methodology file — Room 202", "enir"],
+    ["Fix Jio's presentation distraction — Room 204", "jio"],
+    ["Rebuild Rovelin's mixed-up pages — Room 205", "rovelin"]
   ]
 },
 
@@ -3224,55 +3306,71 @@ makeOfficeSupplies(-6.3, baseY, 1.8);
 // ADDITIONAL FURNITURE
 makeWhiteboard(-7.0, baseY, 5.0, Math.PI);
 
+// ROOM 204 — JIO'S RESULTS WORKSTATION
+makeDesk(7.2, baseY, -6.5);
+makeChair(7.2, baseY, -5.3);
+
+// ROOM 205 — ROVELIN'S GROUP STUDY DESK
+makeDesk(8.3, baseY, 2.0);
+makeChair(8.3, baseY, 3.2);
+
     // KRISTINE — GIRL, SHORT BLACK HAIR
     makeNPC(-6.2, baseY, -7.0, 0x547b83, {
       longHair: false
     });
 
-// ENIR, JIO, AND ROVELIN — GROUP STUDY ROOM 202
-makeNPC(-8.7, baseY, 2.2, 0x826a91, {
+// ENIR — GROUP STUDY ROOM 202
+makeNPC(-8.2, baseY, 2.2, 0x826a91, {
   curlyHair: true,
   glasses: true
 });
 
-makeNPC(-4.8, baseY, 2.2, 0x52665c, {
+// JIO — CLASSROOM 204
+makeNPC(7.2, baseY, -5.6, 0x52665c, {
   moles: [
     { side: "left", position: "cheek" },
     { side: "right", position: "forehead" }
   ]
 });
 
-makeNPC(-6.8, baseY, -2.7, 0x98765b, {
+// ROVELIN — GROUP STUDY ROOM 205
+makeNPC(8.3, baseY, 3.7, 0x98765b, {
   longHair: true,
   hairClip: true
+});
+
+// Teacher supervising Classroom 201.
+makeNPC(-7.0, baseY, -13.1, 0x2f5d78, {
+  noCollider: true,
+  rotationY: Math.PI
 });
 
     // GROUPMATE INTERACTABLES
     addInteractable(
       2, -6.2, -7.0,
       "KRISTINE — CLASSROOM 201",
-      "I'm Kristine. Here's the literature review and my checked citation list. Please don't change the margins again.",
-      "kristine", "npc"
+      "Ms. Reyes needs you to watch the class and finish a quick roll-call check before Kristine can hand over the literature review and citation list.",
+      "kristine", "groupmate1"
     );
 
 addInteractable(
-  2, -8.7, 2.2,
+  2, -8.2, 2.2,
   "ENIR — GROUP STUDY ROOM 202",
-  "I'm Enir. Here's the methodology section and data-gathering notes. Yes, I brought the file named FINAL-final-v7.",
-  "enir", "npc"
+  "Enir's methodology file is buried in a group-chat download pile. Recover the right version and confirm the data-gathering notes before collecting it.",
+  "enir", "groupmate2"
 );
 addInteractable(
-  2, -4.8, 2.2,
-  "JIO — GROUP STUDY ROOM 202",
-  "I'm Jio. Here's the results and data analysis. I sent it to the group chat and the group chat only.",
-  "jio", "npc"
+  2, 7.2, -5.6,
+  "JIO — CLASSROOM 204",
+  "Jio's results slide deck is open, but the class projector is showing the group chat. Clear the hard presentation check before collecting the analysis section.",
+  "jio", "groupmate3"
 );
 
 addInteractable(
-  2, -6.8, -2.7,
-  "ROVELIN — GROUP STUDY ROOM 202",
-  "I'm Rovelin. Here's the conclusion and recommendations. Let's submit before someone saves FINAL2 over it.",
-  "rovelin", "npc"
+  2, 8.3, 3.7,
+  "ROVELIN — GROUP STUDY ROOM 205",
+  "Rovelin's conclusion pages got mixed into a pile of drafts. Rebuild the correct thesis order and verify the final copy before taking the hard objective reward.",
+  "rovelin", "groupmate4"
 );
 
 
@@ -3523,10 +3621,39 @@ addInteractable(
       0,
       baseY,
       -2,
-      0x2f5d78,
+      0x1767a5,
       { noCollider: true, rotationY: 0 }
     );
 
+    const guardCap = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.20, 0.25, 0.12, 16),
+      mat(0xf0bd45)
+    );
+    guardCap.position.set(0, 1.94, 0);
+    guardCap.castShadow = true;
+    securityGuard.add(guardCap);
+
+    const guardCapBrim = new THREE.Mesh(
+      new THREE.BoxGeometry(0.48, 0.045, 0.28),
+      mat(0xf0bd45)
+    );
+    guardCapBrim.position.set(0, 1.87, 0.12);
+    guardCapBrim.castShadow = true;
+    securityGuard.add(guardCapBrim);
+
+    const guardBadge = new THREE.Mesh(
+      new THREE.BoxGeometry(0.14, 0.19, 0.035),
+      mat(0xffdf75)
+    );
+    guardBadge.position.set(0.17, 1.2, 0.31);
+    securityGuard.add(guardBadge);
+
+    const guardBelt = new THREE.Mesh(
+      new THREE.BoxGeometry(0.56, 0.09, 0.38),
+      mat(0xf0bd45)
+    );
+    guardBelt.position.set(0, 0.69, 0);
+    securityGuard.add(guardBelt);
 
     addInteractable(
       1, -8.0, -11.0,
@@ -3679,29 +3806,29 @@ const challengeBank = {
 
   groupmate1: [
     [
-      "What should the research background explain?",
+      "Ms. Reyes left the roll-call sheet. Three students are present and two are absent. How many names should be marked present?",
       [
-        "The research problem and context",
-        "Only images",
-        "Decorative headings"
+        "Three",
+        "Five",
+        "Zero, the sheet looks complicated"
       ],
       0
     ],
     [
-      "What should you verify in related literature?",
+      "A student is talking while the class is working. What should you do?",
       [
-        "Same publication year",
-        "Relevant sources and correct citations",
-        "No references"
+        "Shout over the whole class",
+        "Calmly remind them to settle and continue the activity",
+        "Join the conversation"
       ],
       1
     ],
     [
-      "You found two sources with conflicting findings. What should you do?",
+      "Ms. Reyes returns and asks for the attendance sheet. What should you hand over?",
       [
-        "Ignore both sources",
-        "Copy only the first source",
-        "Compare their methods, evidence, and relevance before synthesizing"
+        "A blank page",
+        "Your thesis draft",
+        "The completed roll call with absences marked clearly"
       ],
       2
     ]
@@ -3734,6 +3861,84 @@ const challengeBank = {
         "Review the alignment between the research questions, design, instruments, and analysis"
       ],
       2
+    ]
+  ],
+
+  groupmate3: [
+    [
+      "The projector is showing the group chat instead of Jio's results. What do you check first?",
+      [
+        "The presentation input and connected device",
+        "The classroom lights",
+        "The teacher's attendance sheet"
+      ],
+      0
+    ],
+    [
+      "A results chart has no labels. What should you add?",
+      [
+        "More decorative transitions",
+        "Clear titles, units, and a readable legend",
+        "A random background image"
+      ],
+      1
+    ],
+    [
+      "The class asks how the findings answer the research question. What should Jio explain?",
+      [
+        "Only the slide colors",
+        "A conclusion unrelated to the data",
+        "How the evidence supports the findings and answers the question"
+      ],
+      2
+    ],
+    [
+      "A student has shared an unverified screenshot of the results. What is the safest response?",
+      [
+        "Check the approved dataset and correct the slide before presenting",
+        "Present the screenshot as fact",
+        "Delete all result slides"
+      ],
+      0
+    ]
+  ],
+
+  groupmate4: [
+    [
+      "Which section normally follows the methodology?",
+      [
+        "Results and discussion",
+        "Title page",
+        "Acknowledgments"
+      ],
+      0
+    ],
+    [
+      "A conclusion makes a claim not supported by the findings. What should you do?",
+      [
+        "Keep it because it sounds confident",
+        "Revise it to match the evidence",
+        "Move it to the title page"
+      ],
+      1
+    ],
+    [
+      "A recommendation should be based on what?",
+      [
+        "A classmate's unrelated opinion",
+        "The longest paragraph",
+        "The study's results and stated limitations"
+      ],
+      2
+    ],
+    [
+      "The final copy contains two versions of the conclusion. Which should Rovelin provide?",
+      [
+        "The reviewed, approved version with consistent headings and page numbers",
+        "Both versions stapled together",
+        "The oldest draft from the downloads folder"
+      ],
+      0
     ]
   ],
 
@@ -3862,9 +4067,20 @@ const taskDescriptions = {
   computer: "In Computer Lab 301, recover the frozen workstation without losing the open thesis document.",
   router: "Restore the lab router and verify that the computer reconnects to the campus network.",
   diagnostic: "Check the thesis file, required sections, and saved version before leaving the lab.",
+  groupmate1: "DISTRACTION — Ms. Reyes has stepped out. Watch Classroom 201 and complete the roll-call check before Kristine shares the literature review.",
+  groupmate2: "DISTRACTION — Enir's group-chat downloads have several nearly identical drafts. Recover the right methodology file and verify its data-gathering notes.",
+  groupmate3: "DISTRACTION — Jio's projector is hijacked by the group chat. Restore the presentation and defend the results through a four-question hard check.",
+  groupmate4: "DISTRACTION — Rovelin's conclusion pages are mixed with old drafts. Rebuild the final section order and verify the approved copy in this hard check.",
   printer: "Find the only working printer, then mash the button before the print timer runs out.",
   binding: "Align the pages in the correct order before the binding timer runs out.",
   submission: "Present the complete, printed, and bound thesis at the Dean's submission desk."
+};
+
+const floorTwoDistractions = {
+  kristine: "CLASS WATCH: Keep the class settled and complete the roll-call check for Ms. Reyes.",
+  enir: "FILE RECOVERY: Ignore the tempting FINAL-final-old copies and verify Enir's methodology version.",
+  jio: "PROJECTOR PANIC: Restore Jio's results slides and answer four presentation checks.",
+  rovelin: "DRAFT RESCUE: Sort the conclusion pages and verify the approved final copy."
 };
 
 function getObjectiveNumber(item) {
@@ -3925,7 +4141,8 @@ function updateHUD() {
 
     const difficulty =
       index === 0 ? "EASY" :
-      index === 1 ? "MEDIUM" : "HARD";
+      index === 1 ? "MEDIUM" :
+      currentFloor === 2 ? "HARD • BONUS +100 PTS / +15 SEC" : "HARD";
 
     item.innerHTML =
       `<span class="objective-status">${done ? "✓" : "○"}</span>
@@ -5178,8 +5395,12 @@ function renderChallenge() {
     return;
   }
 
-  const challenge =
-    challengeBank[activeInteraction.kind][challengeIndex];
+  const challengeSet = challengeBank[activeInteraction.kind];
+  if (!Array.isArray(challengeSet) || !challengeSet[challengeIndex]) {
+    throw new Error(`Missing challenge ${activeInteraction.kind}:${challengeIndex}`);
+  }
+  const total = challengeSet.length;
+  const challenge = challengeSet[challengeIndex];
 
   const difficulty =
     objectiveNumber === 1
@@ -5188,10 +5409,17 @@ function renderChallenge() {
         ? "MEDIUM"
         : "HARD";
 
+  if (activeInteraction.floor === 2) {
+    const distraction = document.createElement("p");
+    distraction.className = "distraction-brief";
+    distraction.textContent = floorTwoDistractions[activeInteraction.id];
+    container.appendChild(distraction);
+  }
+
   const progress = document.createElement("p");
   progress.className = "challenge-progress";
   progress.textContent =
-    `OBJECTIVE ${objectiveNumber} • ${difficulty} • QUESTION ${challengeIndex + 1} OF 3`;
+    `OBJECTIVE ${objectiveNumber} • ${difficulty} • QUESTION ${challengeIndex + 1} OF ${total}`;
 
   container.appendChild(progress);
 
@@ -5247,12 +5475,12 @@ function renderChallenge() {
       next.className = "challenge-next";
 
       next.textContent =
-        challengeIndex === 2
+        challengeIndex === total - 1
           ? "FINISH OBJECTIVE"
           : "NEXT QUESTION";
 
       next.addEventListener("click", () => {
-        if (challengeIndex < 2) {
+        if (challengeIndex < total - 1) {
           challengeIndex++;
           challengeAnswered = false;
           renderChallenge();
@@ -5476,7 +5704,7 @@ function finishChallenge() {
   clearFloorChallengeTimer();
   const objectiveNumber = getObjectiveNumber(activeInteraction);
 
-  const total = 3;
+  const total = challengeBank[activeInteraction.kind].length;
   const passed = challengeCorrect === total;
 
   const container = $("interaction-extra");
@@ -5490,7 +5718,7 @@ function finishChallenge() {
   result.textContent = passed
     ? activeInteraction.id === "diagnostic"
       ? "HARD OBJECTIVE PASSED! All four colored wires are correctly connected."
-      : `OBJECTIVE PASSED! You answered all ${total} questions correctly.`
+      : `OBJECTIVE PASSED! You answered all ${total} questions correctly.${activeInteraction.floor === 2 && objectiveNumber >= 3 ? " HARD PERK: +100 BONUS POINTS AND +15 SECONDS ON CONFIRM." : ""}`
     : `You answered ${challengeCorrect} out of ${total} correctly. Review the answers and try again.`;
 
   container.appendChild(result);
@@ -5697,7 +5925,15 @@ if (item.kind === "teacher" && item.id === "teacherC") {
 
   completedTasks.add(item.id);
 
-  score += 150;
+  const isHardSecondFloorObjective =
+    item.floor === 2 && getObjectiveDifficulty(item) === "HARD";
+  const objectivePoints = isHardSecondFloorObjective ? 250 : 150;
+
+  score += objectivePoints;
+
+  if (isHardSecondFloorObjective) {
+    timeLeft = Math.min(GAME_TIME_LIMIT, timeLeft + 15);
+  }
 
   if (item.id === "printer") printedThesis = true;
   if (item.id === "binding") boundThesis = true;
@@ -5719,8 +5955,12 @@ if (item.kind === "teacher" && item.id === "teacherC") {
 
   showToast(
     allDone
-      ? "ALL OBJECTIVES COMPLETED! You may now walk downstairs."
-      : "OBJECTIVE COMPLETED! +150 POINTS"
+      ? isHardSecondFloorObjective
+        ? "ALL OBJECTIVES COMPLETE! HARD PERK: +250 POINTS, +15 SECONDS. Stairs unlocked!"
+        : "ALL OBJECTIVES COMPLETED! You may now walk downstairs."
+      : isHardSecondFloorObjective
+        ? "HARD OBJECTIVE COMPLETE! +250 POINTS, +15 SECONDS."
+        : `OBJECTIVE COMPLETED! +${objectivePoints} POINTS`
   );
 
   lockMouse();
@@ -6003,6 +6243,8 @@ examArrivalTimeLeft = 10;
   timerInterval = null;
   guardCatchCooldown = 0;
   guardSafeTime = 0;
+  guardMemoryTime = 0;
+  guardLastSeen = null;
 
   if (securityGuard) {
     securityGuard.position.set(0, FLOOR_Y[1], -2);
