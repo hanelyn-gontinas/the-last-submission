@@ -1,0 +1,152 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#292b29">
+  <title>The Last Submission | School Exploration</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <div id="game-world"></div>
+
+  <div id="loading-screen">
+    <div class="loading-card">
+      <div class="spinner"></div>
+      <p>PREPARING THE SCHOOL...</p>
+    </div>
+  </div>
+
+  <section id="menu-screen" class="screen">
+    <div class="menu-card">
+      <p class="eyebrow">A FIRST-PERSON SCHOOL ADVENTURE</p>
+      <h1>THE LAST<br><span>SUBMISSION</span></h1>
+      <p class="subtitle">One thesis. Three floors. One deadline.</p>
+      <div class="deadline">
+        <strong>12 NN</strong>
+        <span>THESIS SUBMISSION DEADLINE</span>
+      </div>
+      <button id="start-button" class="primary-button">ENTER THE SCHOOL</button>
+      <button id="instructions-button" class="secondary-button">HOW TO PLAY</button>
+      <p class="menu-footer">EXPLORE • DISCOVER • COMPLETE YOUR MISSION</p>
+    </div>
+  </section>
+
+<section id="instructions-screen" class="screen hidden">
+  <div class="modal-card">
+    <p class="eyebrow">PLAYER GUIDE</p>
+    <h2>HOW TO PLAY</h2>
+
+    <div class="control-row"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd><span>Walk around</span></div>
+    <div class="control-row"><kbd>MOUSE</kbd><span>Look around</span></div>
+    <div class="control-row"><kbd>E</kbd><span>Interact, open doors, and use stairs</span></div>
+    <div class="control-row"><kbd>SPACE</kbd><span>Jump</span></div>
+    <div class="control-row"><kbd>SHIFT</kbd><span>Show / hide cursor</span></div>
+    <div class="control-row"><kbd>ESC</kbd><span>Pause the game</span></div>
+
+<p>Explore the school, enter the rooms, and complete all practical tasks. Finish every objective on your current floor before going downstairs. Complete all nine tasks within 4 minutes and 30 seconds.</p>
+    <button id="back-button" class="primary-button">BACK TO MENU</button>
+  </div>
+</section>
+
+  <div id="game-hud" class="hidden">
+    <header class="topbar">
+      <div class="game-brand"><span></span> THE LAST SUBMISSION</div>
+<div class="stats">
+  <div>
+    <small>TIME LEFT</small>
+    <strong id="timer">04:30</strong>
+  </div>
+  <div>
+    <small>FLOOR</small>
+    <strong id="floor-display">3RD FLOOR</strong>
+  </div>
+  <div>
+    <small>SCORE</small>
+    <strong id="score">0000</strong>
+  </div>
+  <div>
+    <small>LIVES</small>
+    <strong id="lives">3</strong>
+  </div>
+</div>
+    </header>
+
+    <aside class="mission-panel">
+      <p class="eyebrow">CURRENT LOCATION</p>
+      <h2 id="location-name">3RD FLOOR</h2>
+      <p id="floor-description">Explore the school.</p>
+      <div class="panel-divider"></div>
+      <h3>YOUR OBJECTIVES</h3>
+      <div id="objective-list"></div>
+      <div class="progress-label">
+        <span>FLOOR PROGRESS</span>
+        <strong id="progress-text">0 / 3</strong>
+      </div>
+      <div class="progress-track"><div id="progress-fill"></div></div>
+    </aside>
+
+    <div class="crosshair"><span></span></div>
+
+    <div id="interaction-prompt" class="interaction-prompt hidden">
+      <kbd>E</kbd>
+      <span id="interaction-text">INTERACT</span>
+    </div>
+
+    <div id="toast" class="toast"></div>
+
+    <footer class="bottom-bar">
+      <div class="controls-hint">
+        <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd><span>MOVE</span>
+        <kbd>E</kbd><span>INTERACT</span>
+        <kbd>SPACE</kbd><span>JUMP</span>
+        <kbd>SHIFT</kbd><span>CURSOR</span>
+        <kbd>ESC</kbd><span>PAUSE</span>
+      </div>
+      <button id="pause-button" class="pause-button">PAUSE</button>
+    </footer>
+  </div>
+
+  <section id="interaction-screen" class="screen hidden">
+    <div class="modal-card task-modal">
+      <p class="eyebrow" id="interaction-category">MISSION TASK</p>
+      <h2 id="interaction-title">TASK</h2>
+      <p id="interaction-description"></p>
+      <div id="interaction-extra" class="interaction-extra"></div>
+      <button id="close-interaction" class="secondary-button">LEAVE TASK</button>
+    </div>
+  </section>
+
+  <section id="pause-screen" class="screen hidden">
+    <div class="modal-card">
+      <p class="eyebrow">GAME PAUSED</p>
+      <h2>TAKE A BREAK</h2>
+      <p>Your game is paused. Continue when you're ready.</p>
+      <button id="resume-button" class="primary-button">RESUME GAME</button>
+      <button id="restart-button" class="secondary-button">RESTART GAME</button>
+      <button id="menu-button" class="secondary-button">MAIN MENU</button>
+    </div>
+  </section>
+
+  <section id="result-screen" class="screen hidden">
+    <div class="modal-card">
+      <p class="eyebrow" id="result-label">MISSION COMPLETE</p>
+      <h2 id="result-title">THESIS SUBMITTED!</h2>
+      <p id="result-message"></p>
+      <div class="final-score">
+        <small>FINAL SCORE</small>
+        <strong id="final-score">0000</strong>
+      </div>
+      <button id="play-again-button" class="primary-button">PLAY AGAIN</button>
+      <button id="result-menu-button" class="secondary-button">MAIN MENU</button>
+    </div>
+  </section>
+
+  <div id="teacher-hit-flash"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+  <script src="script.js"></script>
+</body>
+</html>
