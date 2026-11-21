@@ -47,7 +47,6 @@ let buildingFloor = 3;
 
 let teacherHitEffectTime = 0;
 let teacherShakeTime = 0;
-let teacherHitCooldown = 0;
 
 let playerPosition = new THREE.Vector3(0, PLAYER_HEIGHT, 4.8);
 
@@ -59,8 +58,6 @@ let gamePaused = false;
 let gameFinished = false;
 let pointerLocked = false;
 
-let teacherChaseCooldown = 0;
-let nextTeacherToChase = "teacherA";
 let score = 0;
 let timeLeft = GAME_TIME_LIMIT;
 let lives = 3;
@@ -106,7 +103,7 @@ const keys = {};
 const colliders = [];
 const interactables = [];
 const ambientNPCs = [];
-const movingTeachers = [];
+const teacherCharacters = [];
 const doors = [];
 const seatSpots = [];
 let seatedOnChair = false;
@@ -1028,11 +1025,6 @@ function makeOfficeSupplies(x, baseY, z) {
 
 
 function updateTeacherHitEffect(delta) {
-
-  if (teacherHitCooldown > 0) {
-    teacherHitCooldown -= delta;
-  }
-
   if (teacherHitEffectTime > 0) {
     teacherHitEffectTime -= delta;
   }
@@ -1057,32 +1049,6 @@ function updateTeacherHitEffect(delta) {
   if (flash) {
     flash.style.opacity =
       teacherHitEffectTime > 0 ? "1" : "0";
-  }
-}
-
-
-function triggerTeacherCatch(teacher) {
-
-  if (teacherHitCooldown > 0) return;
-
-  teacherHitCooldown = 2;
-  penalties++;
-
-  // TIME PENALTY
-  timeLeft = Math.max(0, timeLeft - 2);
-  updateHUD();
-
-  // SCREEN EFFECT
-  teacherHitEffectTime = 0.35;
-  teacherShakeTime = 0.25;
-
-  // POKE ANIMATION TRIGGER
-  teacher.pokeTime = 0.25;
-
-  showToast("TEACHER CAUGHT YOU! -2 SECONDS");
-
-  if (timeLeft <= 0) {
-    finishGame(false);
   }
 }
 
@@ -1193,6 +1159,18 @@ function updateSecurityGuard(delta) {
   securityGuard.rotation.y = securityGuard.patrolDirection > 0
     ? 0
     : Math.PI;
+}
+
+function areFloorObjectivesComplete(floor) {
+  return floorInfo[floor].tasks.every(([, taskId]) =>
+    completedTasks.has(taskId)
+  );
+}
+
+function getRemainingFloorObjectives(floor) {
+  return floorInfo[floor].tasks
+    .filter(([, taskId]) => !completedTasks.has(taskId))
+    .map(([description]) => description);
 }
 
 function hasGuardLineOfSight(origin, target) {
@@ -2033,94 +2011,6 @@ function buildAmbientNPCs(floor, baseY) {
       maxZ: 6,
       book: true
     });
-
-    makeAmbientNPC(-1.2, baseY, -3, 0x9b7657);
-    makeAmbientNPC(-0.5, baseY, -3.5, 0x55745f);
-  }
-
-  // SECOND FLOOR
-  if (floor === 2) {
-
-    // WALKING STUDENT — LEFT SIDE
-    makeAmbientNPC(-1.5, baseY, -12, 0x98765b, {
-      walking: true,
-      speed: 0.6,
-      minZ: -14,
-      maxZ: -6,
-      backpack: true
-    });
-
-    // WALKING STUDENT — RIGHT SIDE
-    makeAmbientNPC(1.5, baseY, 1, 0x547b83, {
-      walking: true,
-      speed: 0.75,
-      minZ: -3,
-      maxZ: 7,
-      book: true
-    });
-
-// WALKING STUDENT — END OF HALLWAY
-makeAmbientNPC(0, baseY, 2, 0x826a91, {
-  walking: true,
-  speed: 0.45,
-  minZ: 0,
-  maxZ: 4,
-  backpack: true
-});
-
-    // STUDENTS TALKING
-    makeAmbientNPC(-1.5, baseY, -1.8, 0x55745f, {
-      rotationY: Math.PI / 2,
-      talking: true
-    });
-
-    makeAmbientNPC(-1.5, baseY, -3.1, 0xb97849, {
-      rotationY: -Math.PI / 2,
-      talking: true
-    });
-
-// STUDENTS SITTING IN THE HALLWAY
-
-// BLUE SHIRT — ROTATE RIGHT
-makeSittingAmbientNPC(
-  -3.2,
-  baseY,
-  5,
-  0x547b83,
-  Math.PI / 2
-);
-
-// PURPLE SHIRT — ROTATE LEFT
-makeSittingAmbientNPC(
-  3.2,
-  baseY,
-  5,
-  0x826a91,
-  -Math.PI / 2
-);
-  }
-
-  // FIRST FLOOR
-  if (floor === 1) {
-    makeAmbientNPC(-1.5, baseY, -10, 0x55745f, {
-      walking: true,
-      speed: 0.7,
-      minZ: -14,
-      maxZ: -5,
-      backpack: true
-    });
-
-    makeAmbientNPC(1.5, baseY, 2, 0x98765b, {
-      walking: true,
-      speed: 0.6,
-      minZ: -3,
-      maxZ: 8,
-      book: true
-    });
-
-    makeAmbientNPC(-1.2, baseY, -1, 0x826a91);
-    makeAmbientNPC(-0.5, baseY, -1.5, 0x547b83);
-    makeAmbientNPC(1.2, baseY, 10, 0xb97849);
   }
 }
 
@@ -2441,35 +2331,35 @@ const roomLabels = {
 const floorInfo = {
   3: {
     name: "THIRD FLOOR",
-    description: "Repair the computer, restore the network, and secure your thesis files.",
+    description: "Lab 301: recover the file, reconnect campus internet, and run diagnostics. All three unlock the stairs.",
 
     tasks: [
-      ["Repair the frozen computer", "computer"],
-      ["Restore the internet connection", "router"],
-      ["Run a system and file check", "diagnostic"]
+      ["Repair the frozen computer in Lab 301", "computer"],
+      ["Restore the connection in Lab 301", "router"],
+      ["Run final thesis diagnostics in Lab 301", "diagnostic"]
     ]
   },
 
 2: {
   name: "SECOND FLOOR",
-  description: "Find your four groupmates and collect their contributions for thesis printing.",
+  description: "Identify your four teammates and collect each thesis section. Faculty favors are optional; all four contributions unlock the stairs.",
 
   tasks: [
-    ["Get Kristine's contribution", "kristine"],
-    ["Get Enir's contribution", "enir"],
-    ["Get Jio's contribution", "jio"],
-    ["Get Rovelin's contribution", "rovelin"]
+    ["Find Kristine in Classroom 201", "kristine"],
+    ["Collect Enir's contribution in Group Study Room 202", "enir"],
+    ["Collect Jio's contribution in Group Study Room 202", "jio"],
+    ["Collect Rovelin's contribution in Group Study Room 202", "rovelin"]
   ]
 },
 
   1: {
     name: "FIRST FLOOR",
-    description: "Find the working printer, bind the thesis, and avoid the guard on your way to the Dean's desk.",
+    description: "Room 101 has the working printer. Print, bind, avoid the guard, then submit to the Dean.",
 
     tasks: [
-      ["Prepare and print the thesis", "printer"],
-      ["Arrange and bind the pages", "binding"],
-      ["Submit the final thesis", "submission"]
+      ["Print the thesis at the working printer in Room 101", "printer"],
+      ["Align and bind the printed pages", "binding"],
+      ["Submit the bound thesis at the Dean's desk", "submission"]
     ]
   }
 };
@@ -2498,44 +2388,24 @@ function addInteractable(
 // MOVING TEACHERS
 // ============================================================
 
-function registerMovingTeacher(id, group, interaction) {
-  movingTeachers.push({
+function registerTeacherCharacter(id, group, interaction) {
+  teacherCharacters.push({
     id,
     group,
     interaction,
-    speed: 1.8,
-    stopDistance: 1.75,
-    triggerDistance: 9,
-    stopped: false,
-    contactCooldown: 0
+    homePosition: group.position.clone(),
+    homeRotation: group.rotation.y
   });
 }
 
-
-function stopTeacherApproach(id) {
-  const teacher = movingTeachers.find(
-    item => item.id === id
-  );
-
-  if (teacher) {
-    teacher.stopped = true;
-  }
-}
-
 function removeCompletedTeacher(id) {
-  const teacherIndex = movingTeachers.findIndex(
+  const teacher = teacherCharacters.find(
     item => item.id === id
   );
 
-  if (teacherIndex === -1) return;
+  if (!teacher) return;
 
-  const teacher = movingTeachers[teacherIndex];
-
-  // Remove teacher's 3D model
-  scene.remove(teacher.group);
-
-  // Remove teacher from moving teachers list
-  movingTeachers.splice(teacherIndex, 1);
+  teacher.group.visible = false;
 
   // Remove teacher's interaction
   const interactionIndex = interactables.indexOf(
@@ -2547,125 +2417,19 @@ function removeCompletedTeacher(id) {
   }
 }
 
-function showTeacherHitEffect() {
+function resetTeacherCharacters() {
+  for (const teacher of teacherCharacters) {
+    teacher.group.visible = true;
+    teacher.group.position.copy(teacher.homePosition);
+    teacher.group.rotation.y = teacher.homeRotation;
+    teacher.interaction.x = teacher.homePosition.x;
+    teacher.interaction.z = teacher.homePosition.z;
 
-  let effect = document.getElementById("teacher-hit-effect");
-
-  if (!effect) {
-
-    effect = document.createElement("div");
-    effect.id = "teacher-hit-effect";
-
-    document.body.appendChild(effect);
-  }
-
-  effect.classList.remove("hit-active");
-
-  // Restart animation
-  void effect.offsetWidth;
-
-  effect.classList.add("hit-active");
-}
-
-
-
-function updateMovingTeachers(delta) {
-
-  if (
-    !gameStarted ||
-    gamePaused ||
-    gameFinished ||
-    currentFloor !== 2 ||
-    activeInteraction
-  ) return;
-
-  // WAIT AFTER THE PREVIOUS FAVOR
-  if (teacherChaseCooldown > 0) {
-    teacherChaseCooldown -= delta;
-
-    if (teacherChaseCooldown <= 0) {
-      teacherChaseCooldown = 0;
-
-      const nextTeacher = movingTeachers.find(
-        teacher => teacher.id === nextTeacherToChase
-      );
-
-      if (nextTeacher) {
-        nextTeacher.stopped = false;
-      }
+    if (!interactables.includes(teacher.interaction)) {
+      interactables.push(teacher.interaction);
     }
-
-    return;
-  }
-
-  // ONLY THE ASSIGNED TEACHER CAN CHASE
-  const teacher = movingTeachers.find(
-    item =>
-      item.id === nextTeacherToChase &&
-      !item.stopped
-  );
-
-  if (!teacher) return;
-
-  const group = teacher.group;
-
-  const dx = playerPosition.x - group.position.x;
-  const dz = playerPosition.z - group.position.z;
-
-  const distance = Math.hypot(dx, dz);
-
-  if (distance > teacher.triggerDistance) return;
-
-  // FACE PLAYER
-  group.rotation.y = Math.atan2(dx, dz);
-
-  // APPROACH PLAYER
-  if (distance > teacher.stopDistance) {
-
-    const movement = Math.min(
-      teacher.speed * delta,
-      distance - teacher.stopDistance
-    );
-
-    group.position.x += (dx / distance) * movement;
-    group.position.z += (dz / distance) * movement;
-  }
-
-  // UPDATE INTERACTION POSITION
-  teacher.interaction.x = group.position.x;
-  teacher.interaction.z = group.position.z;
-
-  // TEACHER CATCH DETECTION
-  const catchDistance = Math.hypot(
-    playerPosition.x - group.position.x,
-    playerPosition.z - group.position.z
-  );
-
-  if (catchDistance <= teacher.stopDistance + 0.15) {
-    triggerTeacherCatch(teacher);
   }
 }
-
-function startTeacherChaseCooldown(completedTeacherId) {
-
-  if (completedTeacherId === "teacherA") {
-    nextTeacherToChase = "teacherB";
-  }
-
-  else if (completedTeacherId === "teacherB") {
-    nextTeacherToChase = "teacherC";
-  }
-
-  else if (completedTeacherId === "teacherC") {
-    nextTeacherToChase = null;
-  }
-
-  teacherChaseCooldown = 5;
-
-  showToast("NEXT TEACHER APPROACHING IN 5 SECONDS...");
-}
-
-
 
 // ============================================================
 // CEILING
@@ -3444,62 +3208,72 @@ makePlant(5.0, baseY, -13.1);
 // ==================================================
 
 // GROUP STUDY TABLE
-makeDesk(-6.2, baseY, 3.0, 2.2);
+makeDesk(-6.8, baseY, 2.2, 2.2);
 
 // FOUR CHAIRS
-makeChair(-7.5, baseY, 4.25);
-makeChair(-4.9, baseY, 4.25);
-makeChair(-7.5, baseY, 1.75);
-makeChair(-4.9, baseY, 1.75);
+makeChair(-8.3, baseY, 3.6);
+makeChair(-5.3, baseY, 3.6);
+makeChair(-8.3, baseY, 0.8);
+makeChair(-5.3, baseY, 0.8);
 
 // STUDY MATERIALS
-makePaper(-6.2, baseY, 3.0);
-makeFolder(-6.7, baseY, 3.0);
-makeOfficeSupplies(-5.8, baseY, 3.0);
+makePaper(-6.8, baseY, 2.2);
+makeFolder(-7.3, baseY, 2.2);
+makeOfficeSupplies(-6.3, baseY, 1.8);
 
 // ADDITIONAL FURNITURE
-makeBookshelf(-9.0, baseY, 4.0);
 makeWhiteboard(-7.0, baseY, 5.0, Math.PI);
-makeComputer(-8.0, baseY, 2.0);
-makePlant(-9.0, baseY, 1.0);
 
     // KRISTINE — GIRL, SHORT BLACK HAIR
     makeNPC(-6.2, baseY, -7.0, 0x547b83, {
       longHair: false
     });
 
-// ENIR — ROOM 202
-makeNPC(-6.2, baseY, 0, 0x826a91, {
+// ENIR, JIO, AND ROVELIN — GROUP STUDY ROOM 202
+makeNPC(-8.7, baseY, 2.2, 0x826a91, {
   curlyHair: true,
   glasses: true
 });
 
-    // JIO — BOY, TWO DISTINCTIVE MOLES
-    makeNPC(-3.5, baseY, -7.0, 0x52665c, {
-      moles: [
-        { side: "left", position: "cheek" },
-        { side: "right", position: "forehead" }
-      ]
-    });
+makeNPC(-4.8, baseY, 2.2, 0x52665c, {
+  moles: [
+    { side: "left", position: "cheek" },
+    { side: "right", position: "forehead" }
+  ]
+});
 
-    // ROVELIN — GIRL, LONG BLACK HAIR WITH HAIR CLIP
-    makeNPC(3.5, baseY, -7.0, 0x98765b, {
-      longHair: true,
-      hairClip: true
-    });
+makeNPC(-6.8, baseY, -2.7, 0x98765b, {
+  longHair: true,
+  hairClip: true
+});
 
     // GROUPMATE INTERACTABLES
-    addInteractable(2, -6.2, -7.0, "KRISTINE", "Hi! Here's my contribution for our thesis printing expenses.", "kristine", "npc");
+    addInteractable(
+      2, -6.2, -7.0,
+      "KRISTINE — CLASSROOM 201",
+      "I'm Kristine. Here's the literature review and my checked citation list. Please don't change the margins again.",
+      "kristine", "npc"
+    );
 
 addInteractable(
-  2, -6.2, 0,
-  "ENIR",
-  "Here's my share for the thesis printing expenses!",
+  2, -8.7, 2.2,
+  "ENIR — GROUP STUDY ROOM 202",
+  "I'm Enir. Here's the methodology section and data-gathering notes. Yes, I brought the file named FINAL-final-v7.",
   "enir", "npc"
 );
-    addInteractable(2, -3.5, -7.0, "JIO", "I brought my contribution. Good luck with the submission!", "jio", "npc");
+addInteractable(
+  2, -4.8, 2.2,
+  "JIO — GROUP STUDY ROOM 202",
+  "I'm Jio. Here's the results and data analysis. I sent it to the group chat and the group chat only.",
+  "jio", "npc"
+);
 
-    addInteractable(2, 3.5, -7.0, "ROVELIN", "Here's my contribution. Let's finish our thesis!", "rovelin", "npc");
+addInteractable(
+  2, -6.8, -2.7,
+  "ROVELIN — GROUP STUDY ROOM 202",
+  "I'm Rovelin. Here's the conclusion and recommendations. Let's submit before someone saves FINAL2 over it.",
+  "rovelin", "npc"
+);
 
 
     // ROOM 203 — FACULTY ROOM / THESIS REVIEW
@@ -3543,7 +3317,7 @@ addInteractable(
   "teacherA", "teacher"
 );
 
-registerMovingTeacher(
+registerTeacherCharacter(
   "teacherA",
   teacherAVisual,
   interactables[interactables.length - 1]
@@ -3566,7 +3340,7 @@ addInteractable(
   "teacherB", "teacher"
 );
 
-registerMovingTeacher(
+registerTeacherCharacter(
   "teacherB",
   teacherBVisual,
   interactables[interactables.length - 1]
@@ -3589,7 +3363,7 @@ addInteractable(
   "teacherC", "teacher"
 );
 
-registerMovingTeacher(
+registerTeacherCharacter(
   "teacherC",
   teacherCVisual,
   interactables[interactables.length - 1]
@@ -3634,122 +3408,25 @@ addInteractable(
   "favorTarget"
 );
 
-// STUDENTS READING NOTES
-makeAmbientNPC(
-  -1.2,
-  baseY,
-  6,
-  0x98765b,
-  {
-    book: true,
-    backpack: true
-  }
-);
-
-makeAmbientNPC(
-  1.2,
-  baseY,
-  6,
-  0x826a91,
-  {
-    book: true
-  }
-);
-
-// STUDENTS TALKING
-makeAmbientNPC(-1.3, baseY, -2, 0x55745f, {
-  rotationY: Math.PI / 2
-});
-
-makeAmbientNPC(-0.6, baseY, -2.5, 0xb97849, {
-  rotationY: -Math.PI / 2
-});
-
-
-    // STUDENTS WAITING IN THE HALLWAY
-    makeAmbientNPC(
-      -1.2,
-      baseY,
-      3,
-      0x536c82,
-      {
-        rotationY: Math.PI,
-        backpack: true
-      }
-    );
-
-    makeAmbientNPC(
-      1.2,
-      baseY,
-      3.5,
-      0xb97849,
-      {
-        rotationY: Math.PI,
-        book: true
-      }
-    );
-
-        // FIVE DECOY STUDENTS
-    // These are NOT the correct groupmates.
-
-    makeNPC(-1.35, baseY, -12, 0x9b7657, {
+    // TWO DECOY STUDENTS — CLASSROOM 201
+    makeNPC(-8.8, baseY, -13.1, 0x9b7657, {
       bangs: true
     });
-
     addInteractable(
-      2, -1.35, -12,
-      "STUDENT",
-      "Hello! Do you need something?",
-      "decoy1",
-      "decoy"
+      2, -8.8, -13.1,
+      "STUDENT — CLASSROOM 201",
+      "I'm waiting for class. Sorry, I don't have any thesis contribution.",
+      "decoy1", "decoy"
     );
 
-    makeNPC(1.35, baseY, -9.5, 0x55745f, {
+    makeNPC(-5.2, baseY, -13.1, 0x55745f, {
       curlyHair: true
     });
-
     addInteractable(
-      2, 1.35, -9.5,
-      "STUDENT",
-      "Hi! I'm just waiting for my class.",
-      "decoy2",
-      "decoy"
-    );
-
-    makeNPC(-1.35, baseY, -5, 0x826a91, {
-      longHair: true
-    });
-
-    addInteractable(
-      2, -1.35, -5,
-      "STUDENT",
-      "Sorry, I don't have the thesis contribution.",
-      "decoy3",
-      "decoy"
-    );
-
-    makeNPC(1.35, baseY, 0, 0xb97849, {
-      glasses: true
-    });
-
-    addInteractable(
-      2, 1.35, 0,
-      "STUDENT",
-      "Are you looking for someone?",
-      "decoy4",
-      "decoy"
-    );
-
-    makeNPC(1.35, baseY, -5, 0x536c82, {
-      tiedBack: true
-    });
-
-    addInteractable(
-      2, 1.35, -5,
-      "STUDENT",
-      "I think you have the wrong person.",
-      "decoy5",
-      "decoy"
+      2, -5.2, -13.1,
+      "STUDENT — CLASSROOM 201",
+      "I think you have the wrong person. Good luck finding your groupmates!",
+      "decoy2", "decoy"
     );
 
 }
@@ -4182,15 +3859,12 @@ const challengeBank = {
 };
 
 const taskDescriptions = {
-  computer: "Repair the frozen computer and recover your thesis document.",
-  router: "Restore the internet connection in the computer laboratory.",
-  diagnostic: "Check the final thesis file before continuing.",
-  groupmate1: "Collect the research background and related literature.",
-  groupmate2: "Collect the methodology and data gathering notes.",
-  thesis: "Organize the final thesis document.",
+  computer: "In Computer Lab 301, recover the frozen workstation without losing the open thesis document.",
+  router: "Restore the lab router and verify that the computer reconnects to the campus network.",
+  diagnostic: "Check the thesis file, required sections, and saved version before leaving the lab.",
   printer: "Find the only working printer, then mash the button before the print timer runs out.",
   binding: "Align the pages in the correct order before the binding timer runs out.",
-  submission: "Submit your completed thesis to the office."
+  submission: "Present the complete, printed, and bound thesis at the Dean's submission desk."
 };
 
 function getObjectiveNumber(item) {
@@ -4421,10 +4095,28 @@ function movePlayer(delta) {
 
     const insideStairLane =
       Math.abs(playerPosition.x) < 1.38;
+    const approachingStairs =
+      currentFloor > 1 &&
+      insideStairLane &&
+      allowedZ >= 7.6;
+    const floorComplete = areFloorObjectivesComplete(currentFloor);
+
+    if (approachingStairs && !floorComplete) {
+      allowedZ = Math.min(playerPosition.z, 7.55);
+
+      if (!stairBlockedNotice) {
+        const remaining = getRemainingFloorObjectives(currentFloor);
+        showToast(
+          `STAIRS LOCKED: Complete ${remaining.length} remaining objective${remaining.length === 1 ? "" : "s"} on this floor first.`
+        );
+        stairBlockedNotice = true;
+      }
+    }
 
     if (
       currentFloor > 1 &&
       insideStairLane &&
+      floorComplete &&
       playerPosition.z >= 7.6 &&
       allowedZ >= 14.0
     ) {
@@ -4439,7 +4131,7 @@ function movePlayer(delta) {
       return;
     }
 
-    if (allowedZ < 13.5) {
+    if (allowedZ < 7.6 || !insideStairLane || floorComplete) {
       stairBlockedNotice = false;
     }
 
@@ -4556,7 +4248,9 @@ function updatePrompt() {
   }
 
   if (isNearStairs()) {
-    $("interaction-text").textContent = "WALK DOWN STAIRS";
+    $("interaction-text").textContent = areFloorObjectivesComplete(currentFloor)
+      ? "GO DOWNSTAIRS"
+      : "STAIRS LOCKED — FINISH OBJECTIVES";
     $("interaction-prompt").classList.remove("hidden");
     return;
   }
@@ -4684,9 +4378,6 @@ function openTeacherInteraction(item) {
 $("accept-favor").addEventListener("click", () => {
 
   acceptedFavors.add(item.id);
-
-  // Stop the teacher from following the player.
-  stopTeacherApproach(item.id);
 
   if (item.id === "teacherA") {
     showCarriedDocuments();
@@ -4918,20 +4609,10 @@ function startExamArrivalCountdown() {
       clearInterval(examArrivalInterval);
       examArrivalInterval = null;
 
-// FAVOR FAILED — RESET TEACHER B
 acceptedFavors.delete("teacherB");
 
-const teacherB = movingTeachers.find(
-  teacher => teacher.id === "teacherB"
-);
-
-if (teacherB) {
-  teacherB.stopped = false;
-  teacherB.contactCooldown = 0;
-}
-
 showToast(
-  "TIME'S UP! TEACHER B IS LOOKING FOR YOU AGAIN!"
+  "FAVOR WINDOW MISSED. Talk to Teacher B again if you want to retry."
 );
     }
 
@@ -5272,8 +4953,6 @@ function startExamWatch(item) {
 
       completedFavors.add("teacherB");
 
-      startTeacherChaseCooldown("teacherB");
-
       removeCompletedTeacher("teacherB");
 
       giveTeacherReward("teacherB");
@@ -5503,7 +5182,11 @@ function renderChallenge() {
     challengeBank[activeInteraction.kind][challengeIndex];
 
   const difficulty =
-    objectiveNumber === 1 ? "EASY" : "MEDIUM";
+    objectiveNumber === 1
+      ? "EASY"
+      : objectiveNumber === 2
+        ? "MEDIUM"
+        : "HARD";
 
   const progress = document.createElement("p");
   progress.className = "challenge-progress";
@@ -5805,7 +5488,7 @@ function finishChallenge() {
   result.className = "challenge-finished";
 
   result.textContent = passed
-    ? objectiveNumber === 3
+    ? activeInteraction.id === "diagnostic"
       ? "HARD OBJECTIVE PASSED! All four colored wires are correctly connected."
       : `OBJECTIVE PASSED! You answered all ${total} questions correctly.`
     : `You answered ${challengeCorrect} out of ${total} correctly. Review the answers and try again.`;
@@ -5869,8 +5552,6 @@ if (item.id === "room205Delivery") {
 
   // Complete Teacher A's favor.
   completedFavors.add("teacherA");
-
-  startTeacherChaseCooldown("teacherA");
 
   removeCompletedTeacher("teacherA");
 
@@ -5964,8 +5645,6 @@ if (item.kind === "teacher" && item.id === "teacherC") {
 
   completedFavors.add("teacherC");
 
-startTeacherChaseCooldown("teacherC");
-
   removeCompletedTeacher("teacherC");
 
   giveTeacherReward("teacherC");
@@ -6036,9 +5715,7 @@ startTeacherChaseCooldown("teacherC");
     return;
   }
 
-  const allDone = floorInfo[currentFloor].tasks.every(task =>
-    completedTasks.has(task[1])
-  );
+  const allDone = areFloorObjectivesComplete(currentFloor);
 
   showToast(
     allDone
@@ -6098,8 +5775,18 @@ function useStairs() {
     return;
   }
 
+  if (!areFloorObjectivesComplete(currentFloor)) {
+    const remaining = getRemainingFloorObjectives(currentFloor);
+    showToast(
+      `STAIRS LOCKED: Complete ${remaining.length} remaining objective${remaining.length === 1 ? "" : "s"} first.`
+    );
+    return;
+  }
+
+  const nextFloor = currentFloor - 1;
+  setPlayerFloor(nextFloor, 0, 7.0);
   showToast(
-    "Walk down the staircase. Your unfinished tasks will remain saved."
+    `You reached the ${floorInfo[nextFloor].name}. Your objectives are saved.`
   );
 }
 
@@ -6244,10 +5931,7 @@ function startGame() {
   completedTasks.clear();
   acceptedFavors.clear();
   completedFavors.clear();
-
-  // RESET TEACHER CHASE SEQUENCE
-  teacherChaseCooldown = 0;
-  nextTeacherToChase = "teacherA";
+  resetTeacherCharacters();
 
   // Reset teacher rewards
   Object.keys(favorRewards).forEach(key => {
@@ -6944,7 +6628,6 @@ function animate() {
 
 updateDoors(delta);
 updateAmbientNPCs(delta);
-updateMovingTeachers(delta);
 updateSecurityGuard(delta);
 updateExamStudents(delta);
 updateTeacherHitEffect(delta);
