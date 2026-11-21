@@ -42,6 +42,7 @@
     <div class="control-row"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd><span>Walk around</span></div>
     <div class="control-row"><kbd>MOUSE</kbd><span>Look around</span></div>
     <div class="control-row"><kbd>E</kbd><span>Interact, open doors, and use stairs</span></div>
+    <div class="control-row"><kbd>CTRL</kbd><span>Sprint (the guard notices you more easily)</span></div>
     <div class="control-row"><kbd>SPACE</kbd><span>Jump</span></div>
     <div class="control-row"><kbd>SHIFT</kbd><span>Show / hide cursor</span></div>
     <div class="control-row"><kbd>ESC</kbd><span>Pause the game</span></div>
@@ -100,6 +101,7 @@
     <footer class="bottom-bar">
       <div class="controls-hint">
         <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd><span>MOVE</span>
+        <kbd>CTRL</kbd><span>SPRINT</span>
         <kbd>E</kbd><span>INTERACT</span>
         <kbd>SPACE</kbd><span>JUMP</span>
         <kbd>SHIFT</kbd><span>CURSOR</span>
@@ -130,6 +132,15 @@
     </div>
   </section>
 
+  <section id="finale-screen" class="screen hidden">
+    <div class="modal-card">
+      <p class="eyebrow">THE FINAL MOMENT</p>
+      <h2>STAMPED. RECEIVED.</h2>
+      <p id="finale-message">The Dean stamps your thesis just in time. Your group chat immediately asks for the PDF.</p>
+      <p class="challenge-progress">PREPARING YOUR FINAL RESULTS...</p>
+    </div>
+  </section>
+
   <section id="result-screen" class="screen hidden">
     <div class="modal-card">
       <p class="eyebrow" id="result-label">MISSION COMPLETE</p>
@@ -139,8 +150,14 @@
         <small>FINAL SCORE</small>
         <strong id="final-score">0000</strong>
       </div>
+      <div class="result-stats">
+        <div><small>TIME REMAINING</small><strong id="final-time">00:00</strong></div>
+        <div><small>PENALTIES</small><strong id="final-penalties">0</strong></div>
+        <div><small>LIVES LEFT</small><strong id="final-lives">0</strong></div>
+      </div>
       <button id="play-again-button" class="primary-button">PLAY AGAIN</button>
       <button id="result-menu-button" class="secondary-button">MAIN MENU</button>
+      <button id="exit-game-button" class="secondary-button">EXIT GAME</button>
     </div>
   </section>
 

@@ -34,6 +34,7 @@ world.appendChild(renderer.domElement);
 const PLAYER_HEIGHT = 1.65;
 const PLAYER_RADIUS = 0.30;
 const FLOOR_HEIGHT = 4;
+const GAME_TIME_LIMIT = 270;
 
 const FLOOR_Y = {
   3: 0,
@@ -61,8 +62,12 @@ let pointerLocked = false;
 let teacherChaseCooldown = 0;
 let nextTeacherToChase = "teacherA";
 let score = 0;
-let timeLeft = 510;
+let timeLeft = GAME_TIME_LIMIT;
 let lives = 3;
+let penalties = 0;
+let printedThesis = false;
+let boundThesis = false;
+let playerHidden = false;
 
 let carriedDocuments = null;
 const acceptedFavors = new Set();
@@ -75,6 +80,11 @@ let examArrivalInterval = null;
 let examArrivalTimeLeft = 10;
 
 let teacherCItemCollected = false;
+
+let securityGuard = null;
+let guardCatchCooldown = 0;
+let guardSafeTime = 0;
+let guardChasing = false;
 
 let activeInteraction = null;
 let nearbyObject = null;
@@ -111,6 +121,8 @@ const clock = new THREE.Clock();
 
 let timerInterval = null;
 let toastTimeout = null;
+let floorChallengeInterval = null;
+let finaleTimeout = null;
 
 // ============================================================
 // MATERIALS
@@ -1054,6 +1066,7 @@ function triggerTeacherCatch(teacher) {
   if (teacherHitCooldown > 0) return;
 
   teacherHitCooldown = 2;
+  penalties++;
 
   // TIME PENALTY
   timeLeft = Math.max(0, timeLeft - 2);
@@ -1071,6 +1084,131 @@ function triggerTeacherCatch(teacher) {
   if (timeLeft <= 0) {
     finishGame(false);
   }
+}
+
+
+function updateSecurityGuard(delta) {
+  if (
+    !gameStarted ||
+    gamePaused ||
+    gameFinished ||
+    activeInteraction ||
+    currentFloor !== 1 ||
+    !securityGuard
+  ) return;
+
+  if (guardCatchCooldown > 0) {
+    guardCatchCooldown -= delta;
+  }
+  if (guardSafeTime > 0) {
+    guardSafeTime = Math.max(0, guardSafeTime - delta);
+  }
+
+  const dx = playerPosition.x - securityGuard.position.x;
+  const dz = playerPosition.z - securityGuard.position.z;
+  const distance = Math.hypot(dx, dz);
+  const forwardX = Math.sin(securityGuard.rotation.y);
+  const forwardZ = Math.cos(securityGuard.rotation.y);
+  const facingDot = distance > 0
+    ? (forwardX * dx + forwardZ * dz) / distance
+    : 1;
+  const detectionRadius = keys.control ? 10.5 : 7.5;
+  const canSeePlayer =
+    guardSafeTime <= 0 &&
+    !playerHidden &&
+    distance <= detectionRadius &&
+    facingDot >= Math.cos(0.72) &&
+    hasGuardLineOfSight(securityGuard.position, playerPosition);
+
+  if (canSeePlayer) {
+    guardChasing = true;
+    securityGuard.rotation.y = Math.atan2(dx, dz);
+
+    if (distance > 1.35) {
+      const speed = keys.control ? 2.8 : 2.35;
+      const movement = Math.min(speed * delta, distance - 1.35);
+      const nextX = securityGuard.position.x + (dx / distance) * movement;
+      const nextZ = securityGuard.position.z + (dz / distance) * movement;
+
+      if (!blocked(nextX, securityGuard.position.z)) {
+        securityGuard.position.x = nextX;
+      }
+      if (!blocked(securityGuard.position.x, nextZ)) {
+        securityGuard.position.z = nextZ;
+      }
+    }
+
+    const catchDistance = Math.hypot(
+      playerPosition.x - securityGuard.position.x,
+      playerPosition.z - securityGuard.position.z
+    );
+
+    if (catchDistance <= 1.55 && guardCatchCooldown <= 0) {
+      guardCatchCooldown = 3;
+      guardSafeTime = 4;
+      penalties++;
+      lives--;
+      timeLeft = Math.max(0, timeLeft - 10);
+      teacherHitEffectTime = 0.35;
+      teacherShakeTime = 0.25;
+      playerHidden = false;
+      playerPosition.set(0, FLOOR_Y[1] + PLAYER_HEIGHT, 7);
+      camera.position.copy(playerPosition);
+      securityGuard.position.set(0, FLOOR_Y[1], -2);
+      securityGuard.patrolDirection = 1;
+      guardChasing = false;
+      updateHUD();
+
+      if (lives <= 0 || timeLeft <= 0) {
+        finishGame(false);
+      } else {
+        showToast("SECURITY GUARD CAUGHT YOU! -1 LIFE, -10 SECONDS. Back to the lobby!");
+      }
+    }
+
+    return;
+  }
+
+  if (guardChasing) {
+    securityGuard.position.x = 0;
+    guardChasing = false;
+  }
+
+  if (typeof securityGuard.patrolDirection === "undefined") {
+    securityGuard.patrolDirection = 1;
+  }
+
+  if (securityGuard.position.z >= 10) {
+    securityGuard.patrolDirection = -1;
+  } else if (securityGuard.position.z <= -10) {
+    securityGuard.patrolDirection = 1;
+  }
+
+  securityGuard.position.z += securityGuard.patrolDirection * 1.25 * delta;
+  securityGuard.position.z = THREE.MathUtils.clamp(
+    securityGuard.position.z,
+    -10,
+    10
+  );
+  securityGuard.rotation.y = securityGuard.patrolDirection > 0
+    ? 0
+    : Math.PI;
+}
+
+function hasGuardLineOfSight(origin, target) {
+  const dx = target.x - origin.x;
+  const dz = target.z - origin.z;
+  const distance = Math.hypot(dx, dz);
+  const steps = Math.ceil(distance / 0.4);
+
+  for (let step = 2; step < steps - 1; step++) {
+    const progress = step / steps;
+    if (blocked(origin.x + dx * progress, origin.z + dz * progress)) {
+      return false;
+    }
+  }
+
+  return true;
 }
 
 function makeNPC(
@@ -2291,12 +2429,12 @@ const roomLabels = {
     left: [
       "PRINTING ROOM 101",
       "LOBBY 102",
-      "SUBMISSION OFFICE 103"
+      "FACULTY ROOM 103"
     ],
     right: [
       "PRINTING ROOM 104",
-      "LOBBY 105",
-      "SUBMISSION OFFICE 106"
+      "LOBBY / GUARD POST 105",
+      "DEAN'S OFFICE 106"
     ]
   }
 };
@@ -2326,7 +2464,7 @@ const floorInfo = {
 
   1: {
     name: "FIRST FLOOR",
-    description: "Print, bind, and submit your completed thesis.",
+    description: "Find the working printer, bind the thesis, and avoid the guard on your way to the Dean's desk.",
 
     tasks: [
       ["Prepare and print the thesis", "printer"],
@@ -3628,7 +3766,7 @@ makeAmbientNPC(-0.6, baseY, -2.5, 0xb97849, {
     makeWhiteboard(-7.0, baseY, -14.7);
     makePrinter(-8.0, baseY, -11.0);
 
-    makeDesk(-5.3, baseY, -11.0);
+    makePrinter(-5.3, baseY, -11.0);
     makeChair(-5.3, baseY, -9.75);
 
     makeCabinet(-9.0, baseY, -6.0);
@@ -3653,6 +3791,12 @@ makeAmbientNPC(-0.6, baseY, -2.5, 0xb97849, {
     makeCabinet(5.0, baseY, -5.5);
     makeBookshelf(8.8, baseY, -4.9);
 
+    // ROOM 104 — LOBBY / SECOND PRINTING AREA
+    makePrinter(8.0, baseY, -11.0);
+    makeDesk(5.8, baseY, -11.0);
+    makeChair(5.8, baseY, -9.75);
+    makePrinter(8.0, baseY, -7.0);
+
 
     // ROOM 103 — SUBMISSION OFFICE
 
@@ -3664,7 +3808,10 @@ makeAmbientNPC(-0.6, baseY, -2.5, 0xb97849, {
     makeBookshelf(9.0, baseY, 11.4);
     makeCabinet(5.0, baseY, 11.4);
 
-    makeNPC(6.2, baseY, -7.0, 0x52665c);
+    makeNPC(6.2, baseY, 8.7, 0x52665c, {
+      noCollider: true,
+      rotationY: Math.PI
+    });
 
     makePaper(6.2, baseY, 7.0);
     makeFolder(7.1, baseY, 7.0);
@@ -3672,12 +3819,62 @@ makeAmbientNPC(-0.6, baseY, -2.5, 0xb97849, {
 
     makePlant(9.0, baseY, 5.2);
 
+    // GUARD POST AND HIDING SPOTS
+    makeDesk(8.4, baseY, -1.6);
+    makeChair(8.4, baseY, -0.35, 0x536c82);
+    addInteractable(
+      1, 8.4, -1.6,
+      "SECURITY GUARD POST",
+      "A quiet visitor log and an aggressively polished bell.",
+      "guardPost", "guardPost"
+    );
+
+    addInteractable(
+      1, -8.0, -6.6,
+      "PRINT ROOM STORAGE",
+      "A tall supply cabinet. Press E to hide or step back out.",
+      "printRoomHideSpot", "hideSpot"
+    );
+    addInteractable(
+      1, 5.2, -4.5,
+      "LOBBY SUPPLY CABINET",
+      "A cabinet full of old forms. Press E to hide or step back out.",
+      "lobbyHideSpot", "hideSpot"
+    );
+
+    securityGuard = makeNPC(
+      0,
+      baseY,
+      -2,
+      0x2f5d78,
+      { noCollider: true, rotationY: 0 }
+    );
+
 
     addInteractable(
       1, -8.0, -11.0,
-      "PRINTING MACHINE",
+      "WORKING PRINTER — ROOM 101",
       "Your thesis document is ready, but the printer needs to be prepared.",
       "printer", "printer"
+    );
+
+    addInteractable(
+      1, -5.3, -11.0,
+      "PRINTER — OUT OF INK",
+      "OUT OF INK. The printer says it has 'one last page' for the third time.",
+      "printerOutOfInk", "printerFailure"
+    );
+    addInteractable(
+      1, 8.0, -11.0,
+      "PRINTER — PAPER JAM",
+      "PAPER JAM. The printer has folded one sheet into a tiny thesis origami.",
+      "printerPaperJam", "printerFailure"
+    );
+    addInteractable(
+      1, 8.0, -7.0,
+      "PRINTER — LONG QUEUE",
+      "LONG QUEUE. A student is printing 400 pages of memes first.",
+      "printerLongQueue", "printerFailure"
     );
 
     addInteractable(
@@ -3689,8 +3886,8 @@ makeAmbientNPC(-0.6, baseY, -2.5, 0xb97849, {
 
     addInteractable(
       1, 6.2, 7.0,
-      "SUBMISSION OFFICE",
-      "The staff member is waiting to receive your final thesis.",
+      "DEAN'S OFFICE — SUBMISSION DESK",
+      "The Dean is waiting to stamp your bound thesis. No loose pages, please.",
       "submission", "submission"
     );
   }
@@ -3991,8 +4188,8 @@ const taskDescriptions = {
   groupmate1: "Collect the research background and related literature.",
   groupmate2: "Collect the methodology and data gathering notes.",
   thesis: "Organize the final thesis document.",
-  printer: "Prepare the printing machine and print your thesis.",
-  binding: "Arrange the pages and prepare the final binding.",
+  printer: "Find the only working printer, then mash the button before the print timer runs out.",
+  binding: "Align the pages in the correct order before the binding timer runs out.",
   submission: "Submit your completed thesis to the office."
 };
 
@@ -4015,12 +4212,15 @@ function getObjectiveDifficulty(item) {
 // HUD
 // ============================================================
 
-function updateHUD() {
-  const minutes = Math.floor(timeLeft / 60);
-  const seconds = timeLeft % 60;
+function formatTime(seconds) {
+  const safeSeconds = Math.max(0, Math.floor(seconds));
+  const minutes = Math.floor(safeSeconds / 60);
+  const remainder = safeSeconds % 60;
+  return `${String(minutes).padStart(2, "0")}:${String(remainder).padStart(2, "0")}`;
+}
 
-  $("timer").textContent =
-    `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+function updateHUD() {
+  $("timer").textContent = formatTime(timeLeft);
 
   $("score").textContent = String(score).padStart(4, "0");
 
@@ -4185,7 +4385,7 @@ function movePlayer(delta) {
     activeInteraction
   ) return;
 
-  const speed = 4.2;
+  const speed = keys.control ? 6.2 : 4.2;
 
   const forward = new THREE.Vector3(
     -Math.sin(yaw),
@@ -4207,6 +4407,7 @@ function movePlayer(delta) {
   if (keys.a || keys.arrowleft) movement.sub(right);
 
   if (movement.lengthSq() > 0) {
+    playerHidden = false;
     movement.normalize().multiplyScalar(speed * delta);
 
     const nextX = playerPosition.x + movement.x;
@@ -4794,6 +4995,7 @@ function openInteraction(item) {
     // DECOY STUDENT — WRONG INTERACTION PENALTY
   if (item.kind === "decoy") {
     lives--;
+    penalties++;
     timeLeft = Math.max(0, timeLeft - 10);
 
     updateHUD();
@@ -4892,6 +5094,39 @@ function openInteraction(item) {
     }
   }
 
+
+  // FIRST-FLOOR OBJECTIVE ORDER
+  if (item.kind === "printerFailure") {
+    showToast(item.description);
+    return;
+  }
+
+  if (item.kind === "guardPost") {
+    showToast("GUARD POST: Keep your voice down. The guard is doing rounds.");
+    return;
+  }
+
+  if (item.kind === "hideSpot") {
+    playerHidden = !playerHidden;
+    showToast(
+      playerHidden
+        ? "YOU'RE HIDING. Stay still until the guard passes."
+        : "You step out of hiding."
+    );
+    return;
+  }
+
+  if (item.floor === 1) {
+    if (item.id === "binding" && !completedTasks.has("printer")) {
+      showToast("Print the thesis first. Binding is not available yet.");
+      return;
+    }
+
+    if (item.id === "submission" && !completedTasks.has("binding")) {
+      showToast("Bind the printed thesis before submission.");
+      return;
+    }
+  }
 
   // REGULAR MISSION TASKS
   if (completedTasks.has(item.id)) {
@@ -5091,11 +5326,171 @@ function showRewardPopup(title, message) {
 // RENDER CHALLENGES
 // ============================================================
 
+function clearFloorChallengeTimer() {
+  if (floorChallengeInterval) {
+    clearInterval(floorChallengeInterval);
+    floorChallengeInterval = null;
+  }
+}
+
+function startFloorChallengeTimer(seconds, display, onTimeout) {
+  clearFloorChallengeTimer();
+  const deadline = performance.now() + seconds * 1000;
+
+  floorChallengeInterval = setInterval(() => {
+    if (!activeInteraction || gamePaused || gameFinished) return;
+
+    const remaining = Math.max(0, deadline - performance.now());
+    display.textContent = `TIME: ${(remaining / 1000).toFixed(1)} SECONDS`;
+
+    if (remaining <= 0) {
+      clearFloorChallengeTimer();
+      onTimeout();
+    }
+  }, 100);
+
+  return deadline;
+}
+
+function failFloorChallenge(container, message, retry) {
+  clearFloorChallengeTimer();
+  penalties++;
+  timeLeft = Math.max(0, timeLeft - 8);
+  updateHUD();
+
+  if (timeLeft <= 0) {
+    finishGame(false);
+    return;
+  }
+
+  container.replaceChildren();
+
+  const feedback = document.createElement("p");
+  feedback.className = "challenge-feedback";
+  feedback.textContent = `${message} -8 SECONDS. Try again!`;
+  container.appendChild(feedback);
+
+  const retryButton = document.createElement("button");
+  retryButton.type = "button";
+  retryButton.className = "challenge-next";
+  retryButton.textContent = "RETRY";
+  retryButton.addEventListener("click", retry);
+  container.appendChild(retryButton);
+}
+
+function renderPrinterMinigame(container) {
+  const requiredPresses = 8;
+  const timeLimit = 8;
+  let presses = 0;
+
+  const progress = document.createElement("p");
+  progress.className = "challenge-progress";
+  progress.textContent = `PRINTING: 0 / ${requiredPresses} • MASH BEFORE THE DEADLINE`;
+
+  const countdown = document.createElement("p");
+  countdown.className = "challenge-progress";
+  countdown.textContent = `TIME: ${timeLimit.toFixed(1)} SECONDS`;
+
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "challenge-next";
+  button.textContent = "MASH TO PRINT!";
+
+  const retry = () => renderPrinterMinigame(container);
+  const deadline = startFloorChallengeTimer(timeLimit, countdown, () => {
+    failFloorChallenge(container, "The printer timed out and printed a blank page.", retry);
+  });
+
+  button.addEventListener("click", () => {
+    if (performance.now() >= deadline) {
+      failFloorChallenge(container, "The printer timed out and printed a blank page.", retry);
+      return;
+    }
+
+    presses++;
+    progress.textContent = `PRINTING: ${presses} / ${requiredPresses} • KEEP IT MOVING`;
+
+    if (presses >= requiredPresses) {
+      clearFloorChallengeTimer();
+      challengeCorrect = 3;
+      finishChallenge();
+    }
+  });
+
+  container.append(progress, countdown, button);
+}
+
+function renderBindingMinigame(container) {
+  const sequence = ["CENTER", "LEFT", "RIGHT"];
+  let step = 0;
+
+  const progress = document.createElement("p");
+  progress.className = "challenge-progress";
+
+  const countdown = document.createElement("p");
+  countdown.className = "challenge-progress";
+  countdown.textContent = "TIME: 12.0 SECONDS";
+
+  const buttons = document.createElement("div");
+  buttons.className = "challenge-options";
+
+  const updateProgress = () => {
+    progress.textContent =
+      `ALIGN THE PAGES: CENTER → LEFT → RIGHT • STEP ${step + 1} OF ${sequence.length}`;
+  };
+  updateProgress();
+
+  const retry = () => renderBindingMinigame(container);
+  const deadline = startFloorChallengeTimer(12, countdown, () => {
+    failFloorChallenge(container, "The pages slipped out of alignment.", retry);
+  });
+
+  for (const alignment of ["LEFT", "CENTER", "RIGHT"]) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "challenge-option";
+    button.textContent = `ALIGN ${alignment}`;
+    button.addEventListener("click", () => {
+      if (performance.now() >= deadline) {
+        failFloorChallenge(container, "The pages slipped out of alignment.", retry);
+        return;
+      }
+
+      if (alignment !== sequence[step]) {
+        failFloorChallenge(container, "Wrong alignment! The cover is now sideways.", retry);
+        return;
+      }
+
+      step++;
+      if (step === sequence.length) {
+        clearFloorChallengeTimer();
+        challengeCorrect = 3;
+        finishChallenge();
+      } else {
+        updateProgress();
+      }
+    });
+    buttons.appendChild(button);
+  }
+
+  container.append(progress, countdown, buttons);
+}
+
 function renderChallenge() {
   if (!activeInteraction) return;
 
   const container = $("interaction-extra");
   container.innerHTML = "";
+
+  if (activeInteraction.id === "printer") {
+    renderPrinterMinigame(container);
+    return;
+  }
+
+  if (activeInteraction.id === "binding") {
+    renderBindingMinigame(container);
+    return;
+  }
 
   const objectiveNumber = getObjectiveNumber(activeInteraction);
 
@@ -5395,6 +5790,7 @@ function renderWirePuzzle(container) {
 // ============================================================
 
 function finishChallenge() {
+  clearFloorChallengeTimer();
   const objectiveNumber = getObjectiveNumber(activeInteraction);
 
   const total = 3;
@@ -5447,6 +5843,7 @@ function completeInteraction() {
   if (!activeInteraction) return;
 
   const item = activeInteraction;
+  clearFloorChallengeTimer();
 
 // TEACHER A — DOCUMENT DELIVERY
 if (item.id === "room205Delivery") {
@@ -5601,9 +5998,30 @@ startTeacherChaseCooldown("teacherC");
   // REGULAR MISSION TASKS
   if (completedTasks.has(item.id)) return;
 
+  if (
+    item.floor === 1 &&
+    item.id === "binding" &&
+    !printedThesis
+  ) {
+    showToast("Print the thesis before binding it.");
+    return;
+  }
+
+  if (
+    item.floor === 1 &&
+    item.id === "submission" &&
+    (!printedThesis || !boundThesis)
+  ) {
+    showToast("Print and bind the thesis before submitting it.");
+    return;
+  }
+
   completedTasks.add(item.id);
 
   score += 150;
+
+  if (item.id === "printer") printedThesis = true;
+  if (item.id === "binding") boundThesis = true;
 
   standFromInteractionSeat();
 
@@ -5614,7 +6032,7 @@ startTeacherChaseCooldown("teacherC");
   updateHUD();
 
   if (item.kind === "submission") {
-    finishGame(true);
+    startSubmissionFinale();
     return;
   }
 
@@ -5629,6 +6047,45 @@ startTeacherChaseCooldown("teacherC");
   );
 
   lockMouse();
+}
+
+function startSubmissionFinale() {
+  clearInterval(timerInterval);
+  timerInterval = null;
+  clearFloorChallengeTimer();
+  clearTimeout(toastTimeout);
+  $("toast").classList.remove("show");
+
+  if (watchExamInterval) {
+    clearInterval(watchExamInterval);
+    watchExamInterval = null;
+  }
+  if (examArrivalInterval) {
+    clearInterval(examArrivalInterval);
+    examArrivalInterval = null;
+  }
+
+  gameFinished = true;
+  gameStarted = false;
+  gamePaused = false;
+  activeInteraction = null;
+
+  if (document.pointerLockElement === renderer.domElement) {
+    document.exitPointerLock();
+  }
+  pointerLocked = false;
+  document.body.classList.add("cursor-visible");
+
+  $("interaction-screen").classList.add("hidden");
+  $("game-hud").classList.add("hidden");
+  $("finale-screen").classList.remove("hidden");
+  $("finale-message").textContent =
+    `The Dean stamps your thesis RECEIVED with ${formatTime(timeLeft)} to spare. Your group chat immediately asks if you can send the PDF.`;
+
+  finaleTimeout = setTimeout(() => {
+    finaleTimeout = null;
+    finishGame(true);
+  }, 2600);
 }
 
 // ============================================================
@@ -5769,9 +6226,20 @@ document.addEventListener("mousemove", event => {
 
 function startGame() {
 
+  clearFloorChallengeTimer();
+  clearTimeout(finaleTimeout);
+  finaleTimeout = null;
+  Object.keys(keys).forEach(key => {
+    keys[key] = false;
+  });
+
   score = 0;
-  timeLeft = 510;
+  timeLeft = GAME_TIME_LIMIT;
   lives = 3;
+  penalties = 0;
+  printedThesis = false;
+  boundThesis = false;
+  playerHidden = false;
 
   completedTasks.clear();
   acceptedFavors.clear();
@@ -5835,6 +6303,7 @@ examArrivalTimeLeft = 10;
 
   $("pause-screen").classList.add("hidden");
   $("result-screen").classList.add("hidden");
+  $("finale-screen").classList.add("hidden");
 
   setPlayerFloor(3, 0, 4.8);
 
@@ -5847,6 +6316,16 @@ examArrivalTimeLeft = 10;
   );
 
   clearInterval(timerInterval);
+  timerInterval = null;
+  guardCatchCooldown = 0;
+  guardSafeTime = 0;
+
+  if (securityGuard) {
+    securityGuard.position.set(0, FLOOR_Y[1], -2);
+    securityGuard.rotation.y = 0;
+    securityGuard.patrolDirection = 1;
+  }
+  guardChasing = false;
 
   timerInterval = setInterval(() => {
     if (!gameStarted || gamePaused || gameFinished) return;
@@ -5869,11 +6348,21 @@ function finishGame(success) {
   gamePaused = false;
 
   clearInterval(timerInterval);
+  timerInterval = null;
+  clearFloorChallengeTimer();
+  clearTimeout(finaleTimeout);
+  finaleTimeout = null;
 
   if (watchExamInterval) {
     clearInterval(watchExamInterval);
     watchExamInterval = null;
   }
+  if (examArrivalInterval) {
+    clearInterval(examArrivalInterval);
+    examArrivalInterval = null;
+  }
+  clearTimeout(toastTimeout);
+  $("toast").classList.remove("show");
 
   if (document.pointerLockElement === renderer.domElement) {
     document.exitPointerLock();
@@ -5886,6 +6375,7 @@ function finishGame(success) {
   $("interaction-screen").classList.add("hidden");
   $("pause-screen").classList.add("hidden");
   $("game-hud").classList.add("hidden");
+  $("finale-screen").classList.add("hidden");
 
   $("result-screen").classList.remove("hidden");
 
@@ -5899,13 +6389,16 @@ function finishGame(success) {
 
   $("result-message").textContent =
     success
-      ? "You completed all objectives and submitted your thesis before the deadline."
+      ? "Your thesis was stamped RECEIVED before the deadline. Your groupmates are already asking for the PDF."
       : lives <= 0
         ? "You ran out of lives. Your mission has ended."
         : "The deadline has passed. You were unable to submit your thesis on time.";
 
   $("final-score").textContent =
     String(score).padStart(4, "0");
+  $("final-time").textContent = formatTime(timeLeft);
+  $("final-penalties").textContent = String(penalties);
+  $("final-lives").textContent = String(lives);
 }
 
 function pauseGame() {
@@ -5936,13 +6429,28 @@ function returnToMenu() {
   gameFinished = false;
 
   clearInterval(timerInterval);
+  timerInterval = null;
+  clearFloorChallengeTimer();
+  clearTimeout(finaleTimeout);
+  finaleTimeout = null;
 
-    if (watchExamInterval) {
+  if (watchExamInterval) {
     clearInterval(watchExamInterval);
     watchExamInterval = null;
   }
+  if (examArrivalInterval) {
+    clearInterval(examArrivalInterval);
+    examArrivalInterval = null;
+  }
+  clearTimeout(toastTimeout);
+  $("toast").classList.remove("show");
 
   watchExamTimeLeft = 30;
+  activeInteraction = null;
+  playerHidden = false;
+  Object.keys(keys).forEach(key => {
+    keys[key] = false;
+  });
 
   if (document.pointerLockElement === renderer.domElement) {
     document.exitPointerLock();
@@ -5953,7 +6461,9 @@ function returnToMenu() {
   document.body.classList.add("cursor-visible");
 
   $("game-hud").classList.add("hidden");
+  $("interaction-screen").classList.add("hidden");
   $("pause-screen").classList.add("hidden");
+  $("finale-screen").classList.add("hidden");
   $("result-screen").classList.add("hidden");
 
   $("menu-screen").classList.remove("hidden");
@@ -5989,7 +6499,18 @@ $("play-again-button").addEventListener("click", startGame);
 
 $("result-menu-button").addEventListener("click", returnToMenu);
 
+$("exit-game-button").addEventListener("click", () => {
+  window.close();
+  window.setTimeout(() => {
+    if (!window.closed) {
+      $("result-message").textContent =
+        "Your browser blocked closing this tab. You can close it manually.";
+    }
+  }, 150);
+});
+
 $("close-interaction").addEventListener("click", () => {
+  clearFloorChallengeTimer();
   standFromInteractionSeat();
 
   activeInteraction = null;
@@ -6424,6 +6945,7 @@ function animate() {
 updateDoors(delta);
 updateAmbientNPCs(delta);
 updateMovingTeachers(delta);
+updateSecurityGuard(delta);
 updateExamStudents(delta);
 updateTeacherHitEffect(delta);
 updatePrompt();
